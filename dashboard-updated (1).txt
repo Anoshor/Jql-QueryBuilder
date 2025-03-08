@@ -1,567 +1,68 @@
-import { useEffect, useState } from "react";
-import { Box, Select, MenuItem, Typography, ListSubheader, TextField, InputAdornment, Tabs, Tab } from "@mui/material";
-import axios from "axios";
-import { useTheme } from "@emotion/react";
-import SearchIcon from "@mui/icons-material/Search";
-import PushPinIcon from '@mui/icons-material/PushPin';
-import DataCard from "../components/DataCard";
+function computeSelectedMetrics(data: any, org: string, project: string, team: string) {
+  let metricsArr: any[] = [];
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`metrics-tabpanel-${index}`}
-      aria-labelledby={`metrics-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
-
-// Define metric display configurations
-const metricDisplayConfig = {
-  "BugsResolvedCount": {
-    displayName: "Bugs Resolved Count",
-    category: "Efficiency",
-    backgroundColor: "orange",
-    borderColor: "darkorange"
-  },
-  "MeanTimeToResolve": {
-    displayName: "MTTR",
-    category: "Efficiency",
-    backgroundColor: "rgba(0, 76, 255, 0.4)",
-    borderColor: "rgb(0, 7, 99)"
-  },
-  "BugsEscapeRate": {
-    displayName: "Bugs Escape Rate",
-    category: "Quality",
-    backgroundColor: "orange",
-    borderColor: "darkorange"
-  },
-  "EpicsDelivered": {
-    displayName: "Epics Delivered",
-    category: "Development",
-    backgroundColor: "rgba(255, 206, 86, 0.4)",
-    borderColor: "rgba(255, 206, 86, 1)"
-  },
-  "DevelopmentCycleTime": {
-    displayName: "Development Cycle Time",
-    category: "Development",
-    backgroundColor: "rgba(75, 192, 192, 0.4)",
-    borderColor: "rgba(75, 192, 192, 1)"
-  },
-  "StoriesDelivered": {
-    displayName: "Stories Delivered",
-    category: "Development",
-    backgroundColor: "rgba(153, 102, 255, 0.4)",
-    borderColor: "rgba(153, 102, 255, 1)"
-  },
-  "StoryPointsCompleted": {
-    displayName: "Story Points Completed",
-    category: "Development",
-    backgroundColor: "rgba(255, 99, 132, 0.4)",
-    borderColor: "rgba(255, 99, 132, 1)"
-  }
-};
-
-// Map tab indices to category names (removed "Year" tab)
-const tabCategories = {
-  0: "Favorites",
-  1: "Efficiency",
-  2: "Quality",
-  3: "Development",
-  4: "Innovation",
-  5: "Support"
-};
-
-export default function Dashboard({ org = "", setOrg, team = "", setTeam, selectId = "", setselectId }) {
-  const [errorMessage, setErrorMessage] = useState("");
-  const [monthlyMetrics, setMonthlyMetrics] = useState(null);
-  const [rollingLabels, setRollingLabels] = useState<string[]>([]);
-  const [searchText, setSearchText] = useState("");
-  const [idSearchText, setIdSearchText] = useState("");
-  const [teamSearchText, setTeamSearchText] = useState("");
-  const [currentTab, setCurrentTab] = useState(1);
-  const [pinnedMetrics, setPinnedMetrics] = useState<string[]>([]);
-  const [notes, setNotes] = useState({});
-
-  const theme = useTheme();
-
-  // Hold both years’ data keyed by year (e.g. "2024", "2025")
-  const [metricsData, setMetricsData] = useState<any>(null);
-
-  const handleOrgChange = (event) => {
-    setOrg(event.target.value);
-    setselectId(""); // Reset project when org changes
-    setTeam(""); // Reset team when org changes
+  // Helper to unwrap metrics from a team object.
+  const getTeamMetrics = (t: any) => {
+    return t.metrics && t.metrics.metrics ? t.metrics.metrics : t.metrics;
   };
 
-  const handleIdChange = (event) => {
-    setselectId(event.target.value);
-    setTeam(""); // Reset team when project changes
-  };
+  if (org) {
+    const orgObj = data.organizations.find((o: any) => o.name === org);
+    if (!orgObj) return null;
 
-  const handleTeamChange = (event) => {
-    setTeam(event.target.value);
-  };
+    if (project) {
+      const projObj = orgObj.projects.find((p: any) => p.name === project);
+      if (!projObj) return null;
 
-  const handleTabChange = (event, newValue) => {
-    setCurrentTab(newValue);
-  };
-
-  useEffect(() => {
-    console.log("org:", org, "project:", selectId, "team:", team);
-  }, [org, selectId, team]);
-
-  const handlePin = (metric) => {
-    setPinnedMetrics((prev) =>
-      prev.includes(metric) ? prev.filter((m) => m !== metric) : [...prev, metric]
-    );
-  };
-
-  const handleNoteChange = (metric, value) => {
-    setNotes((prev) => ({ ...prev, [metric]: value }));
-  };
-
-  // Fetch metrics data once and store both years' data.
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const response = await axios.get("http://localhost:5000/metrics");
-        const dataByYear = {};
-        response.data.forEach((doc) => {
-          dataByYear[doc.year] = doc;
-        });
-        setMetricsData(dataByYear);
-      } catch (err) {
-        console.error(err);
-        setErrorMessage("Error fetching metrics data");
-      }
-    };
-    fetchMetrics();
-  }, []);
-
-  // Helper function to aggregate metrics for one year's document based on current selections.
-  function computeSelectedMetrics(data: any, org: string, project: string, team: string) {
-    let metricsArr: any[] = [];
-
-    if (org) {
-      const orgObj = data.organizations.find((o: any) => o.name === org);
-      if (!orgObj) return null;
-
-      if (project) {
-        const projObj = orgObj.projects.find((p: any) => p.name === project);
-        if (!projObj) return null;
-
-        if (team) {
-          const teamObj = projObj.teams.find((t: any) => t.name === team);
-          if (!teamObj) return null;
-          metricsArr = [teamObj.metrics];
-        } else {
-          metricsArr = projObj.teams.map((t: any) => t.metrics);
-        }
+      if (team) {
+        const teamObj = projObj.teams.find((t: any) => t.name === team);
+        if (!teamObj) return null;
+        metricsArr = [getTeamMetrics(teamObj)];
       } else {
-        metricsArr = orgObj.projects.flatMap((p: any) =>
-          p.teams.map((t: any) => t.metrics)
-        );
+        // Aggregate data from all teams under the selected project
+        metricsArr = projObj.teams.map((t: any) => getTeamMetrics(t));
       }
     } else {
-      metricsArr = data.organizations.flatMap((o: any) =>
-        o.projects.flatMap((p: any) => p.teams.map((t: any) => t.metrics))
+      // Aggregation at org level: include metrics from all teams in every project under the organization.
+      metricsArr = orgObj.projects.flatMap((p: any) =>
+        p.teams.map((t: any) => getTeamMetrics(t))
       );
     }
-
-    if (!metricsArr.length) return null;
-    metricsArr = metricsArr.filter((m) => m && Object.keys(m).length);
-    if (!metricsArr.length) return null;
-
-    const aggregated: any = {};
-    const keys = Object.keys(metricsArr[0]);
-    for (const key of keys) {
-      aggregated[key] = Array(12).fill(0);
-    }
-
-    metricsArr.forEach((m) => {
-      keys.forEach((key) => {
-        if (m[key] && m[key].length === 12) {
-          for (let i = 0; i < 12; i++) {
-            aggregated[key][i] += m[key][i];
-          }
-        }
-      });
-    });
-    return aggregated;
-  }
-
-  // Compute rolling 12-month metrics based on the current date.
-  useEffect(() => {
-    if (!metricsData) return;
-
-    const now = new Date();
-    const currentYearStr = now.getFullYear().toString();
-    const currentMonth = now.getMonth(); // 0-indexed (Jan = 0, Feb = 1, …)
-    const previousYearStr = (now.getFullYear() - 1).toString();
-
-    // Get aggregated metrics for current and previous year (if available)
-    const aggCurrent = metricsData[currentYearStr]
-      ? computeSelectedMetrics(metricsData[currentYearStr], org, selectId, team)
-      : null;
-    const aggPrevious = metricsData[previousYearStr]
-      ? computeSelectedMetrics(metricsData[previousYearStr], org, selectId, team)
-      : null;
-
-    let aggregated;
-    if (aggCurrent && aggPrevious) {
-      aggregated = {};
-      // For a rolling window, we take months (currentMonth+1) to December from previous year
-      // and months January to currentMonth from the current year.
-      const countPrevious = 11 - currentMonth; // e.g. if currentMonth = 2 (March), countPrevious = 9 (Apr–Dec)
-      const countCurrent = currentMonth + 1; // e.g. 3 months: Jan–Mar
-
-      // Build rolling labels accordingly.
-      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      const labels: string[] = [];
-      for (let i = 0; i < countPrevious; i++) {
-        const monthIndex = currentMonth + 1 + i;
-        labels.push(`${monthNames[monthIndex]} ${previousYearStr.slice(-2)}`);
-      }
-      for (let i = 0; i < countCurrent; i++) {
-        labels.push(`${monthNames[i]} ${currentYearStr.slice(-2)}`);
-      }
-      setRollingLabels(labels);
-
-      // Merge the data arrays in the same order.
-      for (const key in aggCurrent) {
-        aggregated[key] = [];
-        // Fill previous year's portion (from index currentMonth+1 to December)
-        for (let i = 0; i < countPrevious; i++) {
-          aggregated[key][i] = aggPrevious[key][currentMonth + 1 + i];
-        }
-        // Fill current year's portion (from January to currentMonth)
-        for (let i = 0; i < countCurrent; i++) {
-          aggregated[key][countPrevious + i] = aggCurrent[key][i];
-        }
-      }
-    } else if (aggCurrent) {
-      aggregated = aggCurrent;
-      setRollingLabels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]);
-    } else if (aggPrevious) {
-      aggregated = aggPrevious;
-      setRollingLabels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]);
-    }
-    setMonthlyMetrics(aggregated);
-  }, [metricsData, org, selectId, team]);
-
-  // Update dropdown filtering based on a reference year (here we use the previous year's document for listing options)
-  const filteredOrgs = metricsData
-    ? metricsData[Object.keys(metricsData)[0]].organizations.filter((o: any) =>
-        o.name.toLowerCase().includes(searchText.toLowerCase())
+  } else {
+    // If no org is selected, aggregate data from every team in every organization.
+    metricsArr = data.organizations.flatMap((o: any) =>
+      o.projects.flatMap((p: any) =>
+        p.teams.map((t: any) => getTeamMetrics(t))
       )
-    : [];
-
-  const filteredProjects =
-    org && metricsData
-      ? (metricsData[Object.keys(metricsData)[0]].organizations.find((o: any) => o.name === org)
-          ?.projects.filter((p: any) => p.name.toLowerCase().includes(idSearchText.toLowerCase())) || [])
-      : [];
-
-  const filteredTeams =
-    org && selectId && metricsData
-      ? (metricsData[Object.keys(metricsData)[0]].organizations
-          .find((o: any) => o.name === org)
-          ?.projects.find((p: any) => p.name === selectId)
-          ?.teams.filter((t: any) => t.name.toLowerCase().includes(teamSearchText.toLowerCase())) || [])
-      : [];
-
-  // Build dynamic metric mapping using the rollingLabels computed above.
-  const metricMapping = {};
-  if (monthlyMetrics && rollingLabels.length === 12) {
-    const metricKeys = Object.keys(monthlyMetrics);
-    metricKeys.forEach((key) => {
-      const config = metricDisplayConfig[key] || {
-        displayName: key,
-        category: "Other",
-        backgroundColor: "rgba(128, 128, 128, 0.4)",
-        borderColor: "rgba(128, 128, 128, 1)"
-      };
-      metricMapping[key] = {
-        displayName: config.displayName,
-        category: config.category,
-        labels: rollingLabels,
-        datasets: [
-          {
-            label: config.displayName,
-            data: monthlyMetrics[key],
-            backgroundColor: config.backgroundColor,
-            borderColor: config.borderColor,
-            borderWidth: 1
-          }
-        ]
-      };
-    });
+    );
   }
 
-  // Filter metrics to display based on the selected tab.
-  const filteredMetrics = Object.entries(metricMapping).filter(([key, value]) => {
-    if (currentTab === 0) {
-      return pinnedMetrics.includes(key);
-    } else {
-      return value.category.toLowerCase() === tabCategories[currentTab].toLowerCase();
-    }
+  if (!metricsArr.length) return null;
+  metricsArr = metricsArr.filter((m) => m && Object.keys(m).length);
+  if (!metricsArr.length) return null;
+
+  // Initialize aggregated object using the keys from the first metric object
+  const aggregated: any = {};
+  const keys = Object.keys(metricsArr[0]);
+  for (const key of keys) {
+    aggregated[key] = Array(12).fill(0);
+  }
+
+  // Sum up the values for each metric across all teams
+  metricsArr.forEach((m) => {
+    keys.forEach((key) => {
+      if (m[key] && m[key].length === 12) {
+        for (let i = 0; i < 12; i++) {
+          aggregated[key][i] += m[key][i];
+        }
+      }
+    });
   });
 
-  return (
-    <Box p={2}>
-      {errorMessage && <Typography color="error">{errorMessage}</Typography>}
-      {!metricsData && !errorMessage && <Typography>Loading data...</Typography>}
-      <Box
-        sx={{
-          display: "flex",
-          flexWrap: "wrap",
-          m: "2vh",
-          justifyContent: "space-between",
-          width: "100%"
-        }}
-      >
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            flex: 1,
-            padding: "0 1%"
-          }}
-        >
-          <Typography variant="h6" sx={{ textAlign: "left", pl: "10px", color: "#4a4a4a" }}>
-            Organization
-          </Typography>
-          <Select
-            style={{
-              borderRadius: "20px",
-              minWidth: "200px",
-              marginBottom: "1vh",
-              boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-              fontSize: "16px",
-              background: theme.palette.background.paper,
-              color: theme.palette.text.primary
-            }}
-            MenuProps={{ autoFocus: false }}
-            value={org}
-            onChange={handleOrgChange}
-            displayEmpty
-            onClose={() => setSearchText("")}
-          >
-            <ListSubheader>
-              <TextField
-                size="small"
-                autoFocus
-                placeholder="Type to search..."
-                fullWidth
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  )
-                }}
-                onChange={(e) => setSearchText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Escape") e.stopPropagation();
-                }}
-              />
-            </ListSubheader>
-            <MenuItem value="">All Organizations</MenuItem>
-            {filteredOrgs.map((o: any) => (
-              <MenuItem key={o.name} value={o.name}>
-                {o.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            flex: 1,
-            padding: "0 1%",
-            transition: "display 1s ease-in-out"
-          }}
-        >
-          <Typography variant="h6" sx={{ textAlign: "left", pl: "10px", color: "#4a4a4a" }}>
-            Projects
-          </Typography>
-          <Select
-            style={{
-              borderRadius: "20px",
-              minWidth: "200px",
-              marginBottom: "1vh",
-              boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-              fontSize: "16px",
-              background: theme.palette.background.paper,
-              color: theme.palette.text.primary
-            }}
-            value={selectId}
-            onChange={handleIdChange}
-            disabled={!org}
-            displayEmpty
-            MenuProps={{ autoFocus: false }}
-            onClose={() => setIdSearchText("")}
-          >
-            <ListSubheader>
-              <TextField
-                size="small"
-                autoFocus
-                placeholder="Type to search..."
-                fullWidth
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  )
-                }}
-                onChange={(e) => setIdSearchText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Escape") e.stopPropagation();
-                }}
-              />
-            </ListSubheader>
-            <MenuItem value="">All Projects</MenuItem>
-            {filteredProjects.map((p: any) => (
-              <MenuItem key={p.name} value={p.name}>
-                {p.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            flex: 1,
-            padding: "0 1%",
-            transition: "display 1s ease-in-out"
-          }}
-        >
-          <Typography variant="h6" sx={{ textAlign: "left", pl: "10px", color: "#4a4a4a" }}>
-            Teams
-          </Typography>
-          <Select
-            style={{
-              borderRadius: "20px",
-              minWidth: "200px",
-              marginBottom: "1vh",
-              boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-              fontSize: "16px",
-              background: theme.palette.background.paper,
-              color: theme.palette.text.primary
-            }}
-            value={team}
-            onChange={handleTeamChange}
-            disabled={!org || !selectId}
-            displayEmpty
-            MenuProps={{ autoFocus: false }}
-            onClose={() => setTeamSearchText("")}
-          >
-            <ListSubheader>
-              <TextField
-                size="small"
-                autoFocus
-                placeholder="Type to search..."
-                fullWidth
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  )
-                }}
-                onChange={(e) => setTeamSearchText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Escape") e.stopPropagation();
-                }}
-              />
-            </ListSubheader>
-            <MenuItem value="">All Teams</MenuItem>
-            {filteredTeams.map((t: any) => (
-              <MenuItem key={t.name} value={t.name}>
-                {t.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </Box>
-      </Box>
+  // Optionally, round each aggregated value to 2 decimal places
+  for (const key in aggregated) {
+    aggregated[key] = aggregated[key].map((value: number) => Number(value.toFixed(2)));
+  }
 
-      <Box sx={{ width: "100%", bgcolor: "background.paper", borderRadius: "40px" }}>
-        <Tabs
-          value={currentTab}
-          onChange={handleTabChange}
-          sx={{
-            borderBottom: 1,
-            borderColor: "divider",
-            mb: 2
-          }}
-        >
-          <Tab
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", borderRadius: "40px" }}>
-                Favorites <PushPinIcon sx={{ ml: 1 }} />
-              </Box>
-            }
-            sx={{ backgroundColor: "#ccffcc" }}
-          />
-          <Tab label="Efficiency" />
-          <Tab label="Quality" />
-          <Tab label="Development" />
-          <Tab label="Innovation" />
-          <Tab label="Support" />
-        </Tabs>
-        <TabPanel value={currentTab} index={currentTab}>
-          {currentTab === 0 && pinnedMetrics.length === 0 ? (
-            <Typography>No Pinned Metrics found</Typography>
-          ) : monthlyMetrics ? (
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
-                gap: 4,
-                width: "100%",
-                transition: "opacity 0.5s ease-in-out"
-              }}
-            >
-              {Object.entries(metricMapping)
-                .filter(([key, value]) => {
-                  if (currentTab === 0) return pinnedMetrics.includes(key);
-                  else return value.category.toLowerCase() === tabCategories[currentTab].toLowerCase();
-                })
-                .map(([key, value]) => (
-                  <DataCard
-                    key={key}
-                    title={value.displayName || key}
-                    data={{
-                      labels: value.labels,
-                      datasets: value.datasets
-                    }}
-                    onPin={() => handlePin(key)}
-                    isPinned={pinnedMetrics.includes(key)}
-                    note={notes[key]}
-                    onNoteChange={(noteValue) => handleNoteChange(key, noteValue)}
-                  />
-                ))}
-            </Box>
-          ) : (
-            <Typography>No metrics data available for this selection</Typography>
-          )}
-        </TabPanel>
-      </Box>
-    </Box>
-  );
+  return aggregated;
 }

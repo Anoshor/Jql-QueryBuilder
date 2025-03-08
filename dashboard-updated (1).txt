@@ -95,8 +95,7 @@ const tabCategories = {
     5: "Support"
 };
 
-export default function Dashboard({org = "", setOrg, team = "", setTeam, selectId = "", setselectId}) {
-    
+export default function Dashboard({ org = "", setOrg, team = "", setTeam, selectId = "", setselectId }) {
     const [errorMessage, setErrorMessage] = useState("");
     const [monthlyMetrics, setMonthlyMetrics] = useState(null);
     const [searchText, setSearchText] = useState("");
@@ -104,226 +103,182 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
     const [teamSearchText, setTeamSearchText] = useState("");
     const [currentTab, setCurrentTab] = useState(1);
     const [pinnedMetrics, setPinnedMetrics] = useState<string[]>([]);
+    const [year, setYear] = useState('2024');
     const [notes, setNotes] = useState({});
     
     const theme = useTheme();
-    // New state for holding the fetched metrics data from the backend
+
+    // New state to hold metrics for both years, keyed by year string
     const [metricsData, setMetricsData] = useState<any>(null);
+
     const handleOrgChange = (event) => {
         setOrg(event.target.value);
         setselectId(""); // Reset selectId when org changes
         setTeam(""); // Reset team when org changes
     }
+
     const handleIdChange = (event) => {
         setselectId(event.target.value);
         setTeam(""); // Reset team when selectId changes
     }
+
     const handleTeamChange = (event) => {
         setTeam(event.target.value);
     }
+
     const handleTabChange = (event, newValue) => {
         setCurrentTab(newValue);
     };
-    
+
     useEffect(() => {
         console.log("org: ", org);
         console.log("selectId: ", selectId);    
         console.log("team: ", team);
     }, [org, selectId, team]);
+
     const handlePin = (metric) => {
         setPinnedMetrics((prev) => 
             prev.includes(metric) ? prev.filter((m) => m !== metric) : [...prev, metric]
         );
     }
+
     const handleNoteChange = (metric, value) => {
-        setNotes((prev) => (
-            {
-                ...prev,
-                [metric]: value,}
-        ));
+        setNotes((prev) => ({
+            ...prev,
+            [metric]: value,
+        }));
     };
-    // New useEffect to fetch metrics data from your backend
+
+    // --- Fetch metrics data only once and store both years ---
     useEffect(() => {
       const fetchMetrics = async () => {
          try {
              const response = await axios.get("http://localhost:5000/metrics");
-             if(response.data && response.data.length > 0){
-                 // Store all metrics data
-                 setMetricsData(response.data);
-             } else {
-                 setErrorMessage("No metrics data available");
-             }
+             // Convert the returned array into an object keyed by year
+             const dataByYear = {};
+             response.data.forEach(doc => {
+                dataByYear[doc.year] = doc;
+             });
+             setMetricsData(dataByYear);
          } catch (err) {
              console.error(err);
              setErrorMessage("Error fetching metrics data");
          }
       };
       fetchMetrics();
-    }, []);
-    // --- New effect: compute aggregated (or selected) metrics when data or selections change ---
-    // Get the current date
-    const [currentDate, setCurrentDate] = useState(new Date());
-    const currentMonth = currentDate.getMonth(); // 0-11
-    const currentYear = currentDate.getFullYear(); // e.g., 2025
+    }, []); // Run only once
+
+    // --- Helper function to aggregate metrics based on current selections --- 
+    // This version works on a single year document (data should have "organizations")
+    function computeSelectedMetrics(data: any, org: string, project: string, team: string) {
+        let metricsArr: any[] = [];
     
-    useEffect(() => {
-        if (!metricsData || !metricsData.length) return;
-        
-        // Create a rolling 12-month dataset
-        const rollingYearData = createRollingYearData(metricsData, currentMonth, currentYear);
-        
-        // Compute selected metrics using the rolling year data
-        const aggregated = computeSelectedMetrics(
-          rollingYearData,
-          org || "",
-          selectId || "",
-          team || ""
-        );
-        
-        console.log("Aggregated Metrics:", aggregated);
-        setMonthlyMetrics(aggregated);
-    }, [metricsData, org, selectId, team, currentMonth, currentYear]);
+        if (org) {
+            const orgObj = data.organizations.find((o: any) => o.name === org);
+            if (!orgObj) return null;
     
-    // Function to create a rolling 12-month dataset from multiple year data
-    function createRollingYearData(allData: any[], currentMonth: number, currentYear: number) {
-        // Deep clone the most recent year's data as our base
-        const mostRecentYearData = allData.find(d => parseInt(d.year) === currentYear);
-        if (!mostRecentYearData) return null;
-        
-        const rollingYearData = JSON.parse(JSON.stringify(mostRecentYearData));
-        
-        // Find previous year's data if it exists
-        const previousYearData = allData.find(d => parseInt(d.year) === currentYear - 1);
-        
-        if (previousYearData) {
-            // For each organization in the rolling year data
-            rollingYearData.organizations.forEach((org: any) => {
-                // Find the matching organization in the previous year
-                const prevOrg = previousYearData.organizations.find((o: any) => o.name === org.name);
-                if (!prevOrg) return;
-                
-                // For each project in the current organization
-                org.projects.forEach((project: any) => {
-                    // Find matching project in previous year
-                    const prevProject = prevOrg.projects.find((p: any) => p.name === project.name);
-                    if (!prevProject) return;
-                    
-                    // For each team in the current project
-                    project.teams.forEach((team: any) => {
-                        // Find matching team in previous year
-                        const prevTeam = prevProject.teams.find((t: any) => t.name === team.name);
-                        if (!prevTeam) return;
-                        
-                        // Replace zeroes in the current year with data from previous year for months beyond the current month
-                        Object.keys(team.metrics).forEach(metricKey => {
-                            for (let month = currentMonth + 1; month < 12; month++) {
-                                team.metrics[metricKey][month] = prevTeam.metrics[metricKey][month];
-                            }
-                        });
-                    });
-                });
-            });
+            if (project) {
+                const projObj = orgObj.projects.find((p: any) => p.name === project);
+                if (!projObj) return null;
+    
+                if (team) {
+                    const teamObj = projObj.teams.find((t: any) => t.name === team);
+                    if (!teamObj) return null;
+                    metricsArr = [teamObj.metrics];
+                } else {
+                    metricsArr = projObj.teams.map((t: any) => t.metrics);
+                }
+            } else {
+                metricsArr = orgObj.projects.flatMap((p: any) => p.teams.map((t: any) => t.metrics));
+            }
+        } else {
+            metricsArr = data.organizations.flatMap((o: any) => 
+                o.projects.flatMap((p: any) => p.teams.map((t: any) => t.metrics))
+            );
         }
-        
-        // Reorder the months to start from current month to 12 months ago
-        rollingYearData.organizations.forEach((org: any) => {
-            org.projects.forEach((project: any) => {
-                project.teams.forEach((team: any) => {
-                    Object.keys(team.metrics).forEach(metricKey => {
-                        const metricArray = team.metrics[metricKey];
-                        const reordered = [];
-                        
-                        // Start from current month and go back 12 months
-                        for (let i = 0; i < 12; i++) {
-                            // Calculate the month index (wrapping around from current month back 12 months)
-                            const monthIndex = (currentMonth - i + 12) % 12;
-                            reordered.push(metricArray[monthIndex]);
-                        }
-                        
-                        // Reverse to get chronological order (12 months ago to current month)
-                        team.metrics[metricKey] = reordered.reverse();
-                    });
-                });
+    
+        if (!metricsArr.length) return null;
+    
+        // Filter out any invalid metric objects
+        metricsArr = metricsArr.filter(m => m && Object.keys(m).length);
+    
+        if (!metricsArr.length) return null;
+    
+        // Initialize aggregated object based on keys of the first metric object
+        const aggregated: any = {};
+        const keys = Object.keys(metricsArr[0]);
+    
+        for (const key of keys) {
+            aggregated[key] = Array(12).fill(0);
+        }
+    
+        // Aggregate metrics (summing over teams)
+        metricsArr.forEach(m => {
+            keys.forEach(key => {
+                if (m[key] && m[key].length === 12) { // Ensure valid data array
+                    for (let i = 0; i < 12; i++) {
+                        aggregated[key][i] += m[key][i];
+                    }
+                }
             });
         });
-        
-        return rollingYearData;
-    }
-
-    // --- Helper function to aggregate metrics based on current selections ---
-    function computeSelectedMetrics(data: any, org: string, project: string, team: string) {
-        if (!data) return null;
-        
-        let metricsArr: any[] = [];
-        if (org) {
-           const orgObj = data.organizations.find((o: any) => o.name === org);
-           if (!orgObj) return null;
-           if (project) {
-             const projObj = orgObj.projects.find((p: any) => p.name === project);
-             if (!projObj) return null;
-             if (team) {
-               const teamObj = projObj.teams.find((t: any) => t.name === team);
-               if (!teamObj) return null;
-               metricsArr = [teamObj.metrics];
-             } else {
-               metricsArr = projObj.teams.map((t: any) => t.metrics);
-             }
-           } else {
-             metricsArr = orgObj.projects.flatMap((p: any) => p.teams.map((t: any) => t.metrics));
-           }
-        } else {
-           metricsArr = data.organizations.flatMap((o: any) => o.projects.flatMap((p: any) => p.teams.map((t: any) => t.metrics)));
-        }
-        if (metricsArr.length === 0) return null;
-        // Aggregate by key (assuming keys like "metric1" and "metric2" exist and each is an array of 12 numbers)
-        const keys = Object.keys(metricsArr[0]);
-        const aggregated: any = {};
-        for (const key of keys) {
-          aggregated[key] = Array(12).fill(0);
-        }
-        for (const m of metricsArr) {
-          for (const key of keys) {
-              for (let i = 0; i < 12; i++) {
-                  aggregated[key][i] += m[key][i];
-              }
-          }
-        }
-        // Always show sum values, regardless of how many teams are selected
+    
         return aggregated;
     }
+
+    // --- Compute the aggregated (or "rolled") metrics whenever data, selections, or year changes ---
+    useEffect(() => {
+        if (!metricsData) return;
+    
+        let aggregated;
+    
+        if (year === '2024') {
+            // Use 2024 data as-is
+            aggregated = computeSelectedMetrics(metricsData["2024"], org, selectId, team);
+        } else if (year === '2025') {
+            // For 2025, we want to use rolling data:
+            // Use the available 2025 data up to the current month,
+            // and fill in the remaining months from 2024 data.
+            const agg2025 = computeSelectedMetrics(metricsData["2025"], org, selectId, team);
+            const agg2024 = computeSelectedMetrics(metricsData["2024"], org, selectId, team);
+    
+            if (agg2025 && agg2024) {
+                // Get current month index (0 = Jan, 1 = Feb, etc.)
+                const currentMonthIndex = new Date().getMonth();
+                // For each metric, replace months after currentMonthIndex with 2024 values
+                for (const key in agg2025) {
+                    for (let i = currentMonthIndex + 1; i < 12; i++) {
+                        agg2025[key][i] = agg2024[key][i];
+                    }
+                }
+                aggregated = agg2025;
+            } else {
+                aggregated = agg2025 || agg2024;
+            }
+        }
+    
+        console.log("Aggregated Metrics:", aggregated);
+        setMonthlyMetrics(aggregated);
+    }, [metricsData, org, selectId, team, year]);
+
     // --- Update the dropdown filtering to use metricsData ---
     const filteredOrgs = metricsData 
-      ? metricsData.organizations.filter((o: any) => o.name.toLowerCase().includes(searchText.toLowerCase()))
+      ? metricsData["2024"].organizations.filter((o: any) => o.name.toLowerCase().includes(searchText.toLowerCase()))
       : [];
     
     const filteredProjects = (org && metricsData) 
-      ? (metricsData.organizations.find((o: any) => o.name === org)?.projects.filter((p: any) =>
+      ? (metricsData["2024"].organizations.find((o: any) => o.name === org)?.projects.filter((p: any) =>
               p.name.toLowerCase().includes(idSearchText.toLowerCase())) || [])
       : [];
     
     const filteredTeams = (org && selectId && metricsData) 
-      ? (metricsData.organizations.find((o: any) => o.name === org)
+      ? (metricsData["2024"].organizations.find((o: any) => o.name === org)
             ?.projects.find((p: any) => p.name === selectId)
             ?.teams.filter((t: any) => t.name.toLowerCase().includes(teamSearchText.toLowerCase())) || [])
       : [];
-
-    // Create dynamic metricMapping from available metrics
-    // Generate rolling year labels based on current month
-    const generateRollingYearLabels = () => {
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const labels = [];
-        
-        // Start from 12 months ago and build up to current month
-        for (let i = 11; i >= 0; i--) {
-            const monthIndex = (currentMonth - i + 12) % 12;
-            const year = (monthIndex > currentMonth) ? currentYear - 1 : currentYear;
-            labels.push(`${monthNames[monthIndex]} ${year.toString().slice(2)}`);
-        }
-        
-        return labels;
-    };
     
-    const chartLabels = generateRollingYearLabels();
+    // Create dynamic metricMapping from available metrics
+    const chartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const metricMapping = {};
     
     // If monthlyMetrics exists, dynamically create the metric mapping
@@ -335,7 +290,7 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
         metricKeys.forEach(key => {
             // Get display config for this metric, or use defaults
             const config = metricDisplayConfig[key] || {
-                displayName: key, // Use the raw key name if no display name is defined
+                displayName: key,
                 category: "Other",
                 backgroundColor: "rgba(128, 128, 128, 0.4)", 
                 borderColor: "rgba(128, 128, 128, 1)"
@@ -358,7 +313,7 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
             };
         });
     }
-
+    
     // Get metrics for current tab category
     const currentCategory = tabCategories[currentTab];
     const filteredMetrics = Object.entries(metricMapping).filter(([key, value]) => {
@@ -367,12 +322,12 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
             return pinnedMetrics.includes(key);
         } else {
             // For other tabs, filter by category
-            return value.category === currentCategory;
+            return value.category.toLowerCase() === tabCategories[currentTab].toLowerCase();
         }
     });
-
+    
     return (
-        <Box p={2}>            
+        <Box p={2}>
             {errorMessage && <Typography color="error">{errorMessage}</Typography>}
             {/* Show loading message if metrics have not been fetched yet */}
             {!metricsData && !errorMessage && <Typography>Loading data...</Typography>}
@@ -385,173 +340,173 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
                     width: "100%",
                 }}
             >   
-            <Box sx={{
-                display: "flex",
-                flexDirection: "column",
-                flex: 1,
-                padding: "0 1%",
-            }}>
-                <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
-                    Organization
-                </Typography>
-                <Select
-                    style={{
-                        borderRadius: "20px",
-                        minWidth: "200px",
-                        marginBottom: "1vh",
-                        boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-                        fontSize: "16px",
-                        background: theme.palette.background.paper,
-                        color: theme.palette.text.primary,
-                    }}
-                    MenuProps={{ autoFocus: false }}
-                    value={org}
-                    onChange={handleOrgChange}
-                    displayEmpty
-                    onClose={() => setSearchText("")}
-                >
-                    <ListSubheader>
-                        <TextField
-                            size="small"
-                            autoFocus
-                            placeholder="Type to search..."
-                            fullWidth
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon />
-                                    </InputAdornment>
-                                )
-                            }}
-                            onChange={(e) => setSearchText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key !== "Escape") {
-                                    e.stopPropagation();
-                                }
-                            }}
-                        />
-                    </ListSubheader>
-                    <MenuItem value="">All Organizations</MenuItem>
-                    {filteredOrgs.map((o: any) => (
-                        <MenuItem key={o.name} value={o.name}>
-                            {o.name}
-                        </MenuItem>
-                    ))}
-                </Select>
-            </Box>
-            <Box sx={{
-                display: "flex",
-                flexDirection: "column",
-                flex: 1,
-                padding: "0 1%",
-                transition: "display 1s ease-in-out",
-            }}>
-                <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
-                    Projects
-                </Typography>
-                <Select
-                    style={{
-                        borderRadius: "20px",
-                        minWidth: "200px",
-                        marginBottom: "1vh",
-                        boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-                        fontSize: "16px",
-                        background: theme.palette.background.paper,
-                        color: theme.palette.text.primary,
-                    }}
-                    value={selectId}
-                    onChange={handleIdChange}
-                    disabled={!org}
-                    displayEmpty
-                    MenuProps={{ autoFocus: false }}
-                    onClose={() => setIdSearchText("")}
-                >
-                    <ListSubheader>
-                        <TextField
-                            size="small"
-                            autoFocus
-                            placeholder="Type to search..."
-                            fullWidth
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon />
-                                    </InputAdornment>
-                                )
-                            }}
-                            onChange={(e) => setIdSearchText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key !== "Escape") {
-                                    e.stopPropagation();
-                                }
-                            }}
-                        />
-                    </ListSubheader>
-                    <MenuItem value="">All Projects</MenuItem>
-                    {filteredProjects.map((p: any) => (
-                        <MenuItem key={p.name} value={p.name}>
-                            {p.name}
-                        </MenuItem>
-                    ))}
-                </Select>
-            </Box>
-                
-            <Box sx={{
-                display: "flex",
-                flexDirection: "column",
-                flex: 1,
-                padding: "0 1%",
-                transition: "display 1s ease-in-out",
-            }}>
-                <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
-                    Teams
-                </Typography>
-                <Select
-                    style={{
-                        borderRadius: "20px",
-                        minWidth: "200px",
-                        marginBottom: "1vh",
-                        boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
-                        fontSize: "16px",
-                        background: theme.palette.background.paper,
-                        color: theme.palette.text.primary,
-                    }}
-                    value={team}
-                    onChange={handleTeamChange}
-                    disabled={!org || !selectId}
-                    displayEmpty
-                    MenuProps={{ autoFocus: false }}
-                    onClose={() => setTeamSearchText("")}
-                >
-                    <ListSubheader>
-                        <TextField
-                            size="small"
-                            autoFocus
-                            placeholder="Type to search..."
-                            fullWidth
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon />
-                                    </InputAdornment>
-                                )
-                            }}
-                            onChange={(e) => setTeamSearchText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key !== "Escape") {
-                                    e.stopPropagation();
-                                }
-                            }}
-                        />
-                    </ListSubheader>
-                    <MenuItem value="">All Teams</MenuItem>
-                    {filteredTeams.map((t: any) => (
-                        <MenuItem key={t.name} value={t.name}>
-                            {t.name}
-                        </MenuItem>
-                    ))}
-                </Select>
-            </Box>
+                <Box sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    flex: 1,
+                    padding: "0 1%",
+                }}>
+                    <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
+                        Organization
+                    </Typography>
+                    <Select
+                        style={{
+                            borderRadius: "20px",
+                            minWidth: "200px",
+                            marginBottom: "1vh",
+                            boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
+                            fontSize: "16px",
+                            background: theme.palette.background.paper,
+                            color: theme.palette.text.primary,
+                        }}
+                        MenuProps={{ autoFocus: false }}
+                        value={org}
+                        onChange={handleOrgChange}
+                        displayEmpty
+                        onClose={() => setSearchText("")}
+                    >
+                        <ListSubheader>
+                            <TextField
+                                size="small"
+                                autoFocus
+                                placeholder="Type to search..."
+                                fullWidth
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon />
+                                        </InputAdornment>
+                                    )
+                                }}
+                                onChange={(e) => setSearchText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Escape") {
+                                        e.stopPropagation();
+                                    }
+                                }}
+                            />
+                        </ListSubheader>
+                        <MenuItem value="">All Organizations</MenuItem>
+                        {filteredOrgs.map((o: any) => (
+                            <MenuItem key={o.name} value={o.name}>
+                                {o.name}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </Box>
+                <Box sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    flex: 1,
+                    padding: "0 1%",
+                    transition: "display 1s ease-in-out",
+                }}>
+                    <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
+                        Projects
+                    </Typography>
+                    <Select
+                        style={{
+                            borderRadius: "20px",
+                            minWidth: "200px",
+                            marginBottom: "1vh",
+                            boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
+                            fontSize: "16px",
+                            background: theme.palette.background.paper,
+                            color: theme.palette.text.primary,
+                        }}
+                        value={selectId}
+                        onChange={handleIdChange}
+                        disabled={!org}
+                        displayEmpty
+                        MenuProps={{ autoFocus: false }}
+                        onClose={() => setIdSearchText("")}
+                    >
+                        <ListSubheader>
+                            <TextField
+                                size="small"
+                                autoFocus
+                                placeholder="Type to search..."
+                                fullWidth
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon />
+                                        </InputAdornment>
+                                    )
+                                }}
+                                onChange={(e) => setIdSearchText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Escape") {
+                                        e.stopPropagation();
+                                    }
+                                }}
+                            />
+                        </ListSubheader>
+                        <MenuItem value="">All Projects</MenuItem>
+                        {filteredProjects.map((p: any) => (
+                            <MenuItem key={p.name} value={p.name}>
+                                {p.name}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </Box>
+                    
+                <Box sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    flex: 1,
+                    padding: "0 1%",
+                    transition: "display 1s ease-in-out",
+                }}>
+                    <Typography style={{ textAlign: "left", paddingLeft: "10px", color: "#4a4a4a" }} variant="h6">
+                        Teams
+                    </Typography>
+                    <Select
+                        style={{
+                            borderRadius: "20px",
+                            minWidth: "200px",
+                            marginBottom: "1vh",
+                            boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
+                            fontSize: "16px",
+                            background: theme.palette.background.paper,
+                            color: theme.palette.text.primary,
+                        }}
+                        value={team}
+                        onChange={handleTeamChange}
+                        disabled={!org || !selectId}
+                        displayEmpty
+                        MenuProps={{ autoFocus: false }}
+                        onClose={() => setTeamSearchText("")}
+                    >
+                        <ListSubheader>
+                            <TextField
+                                size="small"
+                                autoFocus
+                                placeholder="Type to search..."
+                                fullWidth
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon />
+                                        </InputAdornment>
+                                    )
+                                }}
+                                onChange={(e) => setTeamSearchText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Escape") {
+                                        e.stopPropagation();
+                                    }
+                                }}
+                            />
+                        </ListSubheader>
+                        <MenuItem value="">All Teams</MenuItem>
+                        {filteredTeams.map((t: any) => (
+                            <MenuItem key={t.name} value={t.name}>
+                                {t.name}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </Box>
             </Box>
             
             <Box sx={{ width: '100%', bgcolor: 'background.paper', borderRadius: '40px'}}>
@@ -577,8 +532,25 @@ export default function Dashboard({org = "", setOrg, team = "", setTeam, selectI
                     <Tab label="Development" />
                     <Tab label="Innovation" />
                     <Tab label="Support" />
+                    <Tab label="Year" />
+                    <Select
+                        value={year}
+                        onChange={(e) => setYear(e.target.value)}
+                        displayEmpty
+                        style={{
+                            borderRadius: "20px",
+                            minWidth: "100px",
+                            marginLeft: "auto",
+                            boxShadow: "0px 2px 10px rgba(0, 0, 0, 0.1)",
+                            fontSize: "16px",
+                            background: theme.palette.background.paper,
+                            color: theme.palette.text.primary,
+                        }}
+                    >
+                        <MenuItem value="2024" onClick={() => setYear('2024')}>2024</MenuItem>
+                        <MenuItem value="2025" onClick={() => setYear('2025')}>2025</MenuItem>
+                    </Select>
                 </Tabs>
-
                 {/* Main content area for metrics */}
                 <TabPanel value={currentTab} index={currentTab}>
                     {currentTab === 0 && pinnedMetrics.length === 0 ? (

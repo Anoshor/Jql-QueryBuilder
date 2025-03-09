@@ -19,7 +19,9 @@ interface DataProps {
   note?: string,
   onNoteChange: (value: string) => void,
   showNote: boolean,
-  setShowNote: (value: React.SetStateAction<boolean>) => void
+  setShowNote: (value: React.SetStateAction<boolean>) => void,
+  barNotes: Record<string, string>,
+  onBarNoteChange: (month: string, value: string) => void
 }
 
 export default function Data({ 
@@ -31,15 +33,16 @@ export default function Data({
   note, 
   onNoteChange, 
   showNote, 
-  setShowNote 
+  setShowNote,
+  barNotes = {},
+  onBarNoteChange
 }: DataProps) {
   const theme = useTheme();
   const colors = tokens(theme.palette.mode);
   const [chartType, setChartType] = useState("BarChart");
   const [toggle, setToggle] = useState(false);
 
-  // Bar note related state
-  const [barNotes, setBarNotes] = useState({});
+  // Dialog state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedValue, setSelectedValue] = useState(0);
@@ -65,20 +68,13 @@ export default function Data({
 
   // Save note for specific bar
   const handleSaveNote = () => {
-    setBarNotes(prev => ({
-      ...prev,
-      [selectedMonth]: noteText
-    }));
+    onBarNoteChange(selectedMonth, noteText);
     setIsDialogOpen(false);
   };
 
   // Delete note for specific bar
   const handleDeleteNote = (month) => {
-    setBarNotes(prev => {
-      const updated = {...prev};
-      delete updated[month];
-      return updated;
-    });
+    onBarNoteChange(month, ''); // Empty string to effectively delete
     
     if (isDialogOpen) {
       setIsDialogOpen(false);
@@ -180,7 +176,7 @@ export default function Data({
               </Typography>
               <Paper elevation={1} sx={{ p: 1, maxHeight: '200px', overflow: 'auto' }}>
                 <List dense>
-                  {Object.entries(barNotes).map(([month, noteText]) => (
+                  {Object.entries(barNotes).filter(([_, note]) => note && note.trim() !== '').map(([month, noteText]) => (
                     <ListItem 
                       key={month}
                       secondaryAction={

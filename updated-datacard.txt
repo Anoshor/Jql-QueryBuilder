@@ -1,0 +1,49 @@
+import { useEffect, useState } from "react";
+import { Box, IconButton, TextField } from "@mui/material";
+import PushPinIcon from "@mui/icons-material/PushPin";
+import NoteAddIcon from "@mui/icons-material/NoteAdd";
+import Data from "../components/Data";
+
+const DataCard = ({ title, data, onPin, isPinned, note, onNoteChange }) => {
+  // Local state for toggling the note input visibility
+  const [showNote, setShowNote] = useState(false);
+
+  return (
+    <Box
+      sx={{
+        borderRadius: "8px",
+        padding: 2,
+        position: "relative",
+      }}
+    >
+      {/* Main data display - passing all needed props including note handling */}
+      <Data
+        title={title}
+        data={data}
+        onPin={onPin}
+        isPinned={isPinned}
+        note={note}
+        onNoteChange={onNoteChange}
+        showNote={showNote}
+        setShowNote={setShowNote}
+      />
+
+      {/* Notes text field */}
+      {showNote && (
+        <Box sx={{ mt: 2 }}>
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Add your notes here..."
+            value={note || ""}
+            onChange={(e) => onNoteChange(e.target.value)}
+            multiline
+            rows={3}
+          />
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+export default DataCard;

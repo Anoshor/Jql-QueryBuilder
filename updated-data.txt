@@ -1,0 +1,172 @@
+import { Box, Card, Divider, IconButton, MenuItem, Select, SelectChangeEvent, Switch, Typography, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button } from "@mui/material";
+import { tokens } from "../theme";
+import React, { useState } from "react";
+import BarChart from "./BarChart";
+import LineChart from "./LineChart"; 
+import { MonthlyMetricsType2 } from "../functions/getMonthlyMetrics";
+import { changeQuarterlyData } from "../functions/changeQuarterlyData";
+import PushPinIcon from "@mui/icons-material/PushPin";
+import NoteAddIcon from "@mui/icons-material/NoteAdd";
+
+interface DataProps {
+  child?: React.JSX.Element,
+  title: string,
+  data: MonthlyMetricsType2,
+  onPin: () => void,
+  isPinned: boolean,
+  note?: string,
+  onNoteChange: (value: string) => void,
+  showNote: boolean,
+  setShowNote: (value: React.SetStateAction<boolean>) => void
+}
+
+export default function Data({ 
+  child, 
+  title, 
+  data, 
+  onPin, 
+  isPinned, 
+  note, 
+  onNoteChange, 
+  showNote, 
+  setShowNote 
+}: DataProps) {
+  const theme = useTheme();
+  const colors = tokens(theme.palette.mode);
+  const [chartType, setChartType] = useState("BarChart");
+  const [toggle, setToggle] = useState(false);
+
+  // Bar note related state
+  const [barNotes, setBarNotes] = useState({});
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedValue, setSelectedValue] = useState(0);
+  const [noteText, setNoteText] = useState('');
+
+  const handleChange = (event: SelectChangeEvent<string>) => {
+    setChartType(event.target.value as string);
+  };
+
+  const handleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setToggle(event.target.checked);
+  };
+
+  // Handle bar click in chart
+  const handleBarClick = (month, value) => {
+    setSelectedMonth(month);
+    setSelectedValue(value);
+    setNoteText(barNotes[month] || '');
+    setIsDialogOpen(true);
+  };
+
+  // Save note for specific bar
+  const handleSaveNote = () => {
+    setBarNotes(prev => ({
+      ...prev,
+      [selectedMonth]: noteText
+    }));
+    setIsDialogOpen(false);
+  };
+
+  // Delete note for specific bar
+  const handleDeleteNote = () => {
+    setBarNotes(prev => {
+      const updated = {...prev};
+      delete updated[selectedMonth];
+      return updated;
+    });
+    setIsDialogOpen(false);
+  };
+
+  return (
+    <Card sx={{ borderRadius: '20px', boxShadow: 4, padding: "2vh", width: '100%', height: 'auto' }}>
+      <Box sx={{ display: 'flex', justifyContent: "space-between", alignItems: 'center', marginBottom: "1%", padding: "0 1%" }}>
+        <Typography variant="h3" color={colors.grey[100]}>
+          {title}
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Select 
+            style={{ width: 'fit-content', height: '40px', margin: '5px' }} 
+            value={chartType} 
+            onChange={handleChange} 
+            label="Chart Type"
+          >
+            <MenuItem value={"BarChart"}>Bar</MenuItem>
+            <MenuItem value={"LineChart"}>Line</MenuItem>
+          </Select>
+          <Switch
+            checked={toggle}
+            onChange={handleToggle}
+            color="primary"
+            inputProps={{ 'aria-label': 'primary checkbox' }}
+          />
+          <Typography variant="h6" color={colors.grey[100]}>
+            {toggle ? "Quarterly" : "Monthly"}
+          </Typography>
+          <IconButton onClick={onPin} color={isPinned ? "primary" : "default"} sx={{ marginLeft: 1 }}>
+            <PushPinIcon />
+          </IconButton>
+          <IconButton onClick={() => setShowNote((prev) => !prev)} sx={{ marginLeft: 1 }}>
+            <NoteAddIcon />
+          </IconButton>
+        </Box>
+      </Box>
+      <Divider />
+      <Box sx={{ padding: "1%" }}>
+        {child ? child : (
+          chartType === "BarChart" ? (
+            <BarChart 
+              title={title} 
+              data={!toggle ? data : changeQuarterlyData(data)} 
+              onBarClick={handleBarClick}
+              barNotes={barNotes}
+            />
+          ) : (
+            <LineChart 
+              title={title} 
+              data={!toggle ? data : changeQuarterlyData(data)}
+            />
+          )
+        )}
+      </Box>
+
+      {/* Bar-specific note dialog */}
+      <Dialog open={isDialogOpen} onClose={() => setIsDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>
+          Add Note for {selectedMonth}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2, mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Value: {selectedValue}
+            </Typography>
+          </Box>
+          <TextField
+            autoFocus
+            label="Note"
+            multiline
+            rows={4}
+            fullWidth
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            variant="outlined"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveNote} color="primary" variant="contained">
+            Save
+          </Button>
+          {barNotes[selectedMonth] && (
+            <Button 
+              onClick={handleDeleteNote} 
+              color="error"
+            >
+              Delete Note
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </Card>
+  );
+}

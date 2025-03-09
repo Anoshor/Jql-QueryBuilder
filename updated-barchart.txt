@@ -21,9 +21,6 @@ ChartJS.register(
   ChartDataLabels
 );
 
-// Register chart plugins
-ChartJS.register(ChartDataLabels);
-
 const BarChart = ({ title, data, onBarClick, barNotes = {} }) => {
   if (!data) return null;
 
@@ -31,14 +28,16 @@ const BarChart = ({ title, data, onBarClick, barNotes = {} }) => {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    onClick: onBarClick ? (event, elements) => {
+    onClick: (event, elements) => {
       if (elements && elements.length > 0) {
         const index = elements[0].index;
         const month = data.labels[index];
         const value = data.datasets[0].data[index];
-        onBarClick(month, value);
+        if (onBarClick) {
+          onBarClick(month, value);
+        }
       }
-    } : undefined,
+    },
     plugins: {
       title: {
         display: false,

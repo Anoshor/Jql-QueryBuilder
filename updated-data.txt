@@ -1,4 +1,4 @@
-import { Box, Card, Divider, IconButton, MenuItem, Select, SelectChangeEvent, Switch, Typography, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button } from "@mui/material";
+import { Box, Card, Divider, IconButton, MenuItem, Select, SelectChangeEvent, Switch, Typography, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Paper, List, ListItem, ListItemText, Collapse } from "@mui/material";
 import { tokens } from "../theme";
 import React, { useState } from "react";
 import BarChart from "./BarChart";
@@ -7,6 +7,8 @@ import { MonthlyMetricsType2 } from "../functions/getMonthlyMetrics";
 import { changeQuarterlyData } from "../functions/changeQuarterlyData";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import NoteAddIcon from "@mui/icons-material/NoteAdd";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 interface DataProps {
   child?: React.JSX.Element,
@@ -42,6 +44,7 @@ export default function Data({
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedValue, setSelectedValue] = useState(0);
   const [noteText, setNoteText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
 
   const handleChange = (event: SelectChangeEvent<string>) => {
     setChartType(event.target.value as string);
@@ -57,6 +60,7 @@ export default function Data({
     setSelectedValue(value);
     setNoteText(barNotes[month] || '');
     setIsDialogOpen(true);
+    setIsEditing(false);
   };
 
   // Save note for specific bar
@@ -69,14 +73,29 @@ export default function Data({
   };
 
   // Delete note for specific bar
-  const handleDeleteNote = () => {
+  const handleDeleteNote = (month) => {
     setBarNotes(prev => {
       const updated = {...prev};
-      delete updated[selectedMonth];
+      delete updated[month];
       return updated;
     });
-    setIsDialogOpen(false);
+    
+    if (isDialogOpen) {
+      setIsDialogOpen(false);
+    }
   };
+
+  // Edit an existing note
+  const handleEditNote = (month, value) => {
+    setSelectedMonth(month);
+    setSelectedValue(value);
+    setNoteText(barNotes[month] || '');
+    setIsDialogOpen(true);
+    setIsEditing(true);
+  };
+
+  // Check if there are any bar notes
+  const hasBarNotes = Object.keys(barNotes).length > 0;
 
   return (
     <Card sx={{ borderRadius: '20px', boxShadow: 4, padding: "2vh", width: '100%', height: 'auto' }}>
@@ -106,12 +125,17 @@ export default function Data({
           <IconButton onClick={onPin} color={isPinned ? "primary" : "default"} sx={{ marginLeft: 1 }}>
             <PushPinIcon />
           </IconButton>
-          <IconButton onClick={() => setShowNote((prev) => !prev)} sx={{ marginLeft: 1 }}>
+          <IconButton 
+            onClick={() => setShowNote((prev) => !prev)} 
+            color={showNote || hasBarNotes ? "primary" : "default"} 
+            sx={{ marginLeft: 1 }}
+          >
             <NoteAddIcon />
           </IconButton>
         </Box>
       </Box>
       <Divider />
+      
       <Box sx={{ padding: "1%" }}>
         {child ? child : (
           chartType === "BarChart" ? (
@@ -130,10 +154,90 @@ export default function Data({
         )}
       </Box>
 
+      {/* Notes section */}
+      <Collapse in={showNote}>
+        <Box sx={{ mt: 2, p: 1 }}>
+          {/* Card-level notes */}
+          <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
+            Chart Notes:
+          </Typography>
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Add general notes about this metric..."
+            value={note || ""}
+            onChange={(e) => onNoteChange(e.target.value)}
+            multiline
+            rows={2}
+            sx={{ mb: 2 }}
+          />
+          
+          {/* Bar-specific notes list */}
+          {hasBarNotes && (
+            <>
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2, mb: 1 }}>
+                Data Point Notes:
+              </Typography>
+              <Paper elevation={1} sx={{ p: 1, maxHeight: '200px', overflow: 'auto' }}>
+                <List dense>
+                  {Object.entries(barNotes).map(([month, noteText]) => (
+                    <ListItem 
+                      key={month}
+                      secondaryAction={
+                        <Box>
+                          <IconButton edge="end" size="small" onClick={() => handleEditNote(month, data?.datasets?.[0]?.data[data.labels.indexOf(month)] || 0)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton edge="end" size="small" onClick={() => handleDeleteNote(month)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      }
+                      sx={{
+                        border: '1px solid',
+                        borderColor: theme.palette.divider,
+                        borderRadius: 1,
+                        mb: 1,
+                        '&:last-child': {
+                          mb: 0
+                        }
+                      }}
+                    >
+                      <ListItemText
+                        primary={<Typography variant="body2" fontWeight="bold">{month}</Typography>}
+                        secondary={
+                          <Typography 
+                            variant="body2" 
+                            color="text.secondary"
+                            sx={{ 
+                              whiteSpace: 'pre-wrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                          >
+                            {noteText}
+                          </Typography>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            </>
+          )}
+
+          {!hasBarNotes && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
+              Click on any bar in the chart to add notes for specific data points.
+            </Typography>
+          )}
+        </Box>
+      </Collapse>
+
       {/* Bar-specific note dialog */}
       <Dialog open={isDialogOpen} onClose={() => setIsDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>
-          Add Note for {selectedMonth}
+          {isEditing ? 'Edit' : 'Add'} Note for {selectedMonth}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 2, mt: 1 }}>
@@ -159,7 +263,7 @@ export default function Data({
           </Button>
           {barNotes[selectedMonth] && (
             <Button 
-              onClick={handleDeleteNote} 
+              onClick={() => handleDeleteNote(selectedMonth)} 
               color="error"
             >
               Delete Note

@@ -59,22 +59,25 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       }
 
       // Check if any suite name matches
-      const suites = project['Test Suites'][0]?.Suites || [];
-      return checkSuiteMatches(suites, searchLower);
+      const suitesList = project['Test Suites'] || [];
+      return suitesList.some(suiteWrapper => {
+        if (!suiteWrapper) return false;
+        return checkSuiteArrayMatches(suiteWrapper?.Suites || [], searchLower);
+      });
     });
 
     setFilteredProjects(filtered);
   }, [searchText, testItData]);
 
-  // Helper function to check if any suite or child suite matches the search
-  const checkSuiteMatches = (suites: Suite[], searchText: string): boolean => {
+  // Helper function to check if any suite in an array matches the search
+  const checkSuiteArrayMatches = (suites: Suite[], searchText: string): boolean => {
     for (const suite of suites) {
-      if (suite['Suite Name'].toLowerCase().includes(searchText)) {
+      if (suite['Suite Name']?.toLowerCase().includes(searchText)) {
         return true;
       }
       
       if (suite.Child_Suites && suite.Child_Suites.length > 0) {
-        if (checkSuiteMatches(suite.Child_Suites, searchText)) {
+        if (checkSuiteArrayMatches(suite.Child_Suites, searchText)) {
           return true;
         }
       }
@@ -128,6 +131,8 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   // Render a suite node and its children recursively
   const renderSuites = (suites: Suite[], projectId: string, parentPath: string = '') => {
     return suites.map(suite => {
+      if (!suite || !suite.Suite_Id) return null;
+      
       const currentPath = parentPath ? `${parentPath}:${suite.Suite_Id}` : `${projectId}:${suite.Suite_Id}`;
       const hasChildren = suite.Child_Suites && suite.Child_Suites.length > 0;
       const isExpanded = expandedNodes[currentPath] || false;
@@ -165,17 +170,41 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
               }}
             >
               {suite['Suite Name']}
+              {suite.totalTestCases > 0 && (
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                  ({suite.totalTestCases} tests)
+                </Typography>
+              )}
             </Typography>
           </Box>
           
           {hasChildren && (
             <Collapse in={isExpanded}>
-              {renderSuites(suite.Child_Suites || [], projectId, currentPath)}
+              {renderSuites(suite.Child_Suites, projectId, currentPath)}
             </Collapse>
           )}
         </Box>
       );
     });
+  };
+
+  // Get all the suites for a project
+  const getProjectSuites = (project: TestItProject): Suite[] => {
+    if (!project['Test Suites'] || project['Test Suites'].length === 0) return [];
+    
+    const allSuites: Suite[] = [];
+    
+    // For each suite wrapper, collect the suites
+    project['Test Suites'].forEach(suiteContainer => {
+      if (suiteContainer.Suites && suiteContainer.Suites.length > 0) {
+        allSuites.push(...suiteContainer.Suites);
+      } else if (suiteContainer.Suite_Id) {
+        // If the suiteContainer is itself a suite
+        allSuites.push(suiteContainer as any as Suite);
+      }
+    });
+    
+    return allSuites;
   };
 
   return (
@@ -220,15 +249,24 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
               
               if (project) {
                 displayName = `${project['Project Name']} - `;
+                
                 // Extract suite names from the path
-                let currentSuites = project['Test Suites'][0]?.Suites || [];
+                let currentSuites = getProjectSuites(project);
                 for (let i = 1; i < pathParts.length; i++) {
                   const suiteId = pathParts[i];
-                  const suite = currentSuites.find(s => s.Suite_Id === suiteId);
-                  if (suite) {
-                    displayName += (i > 1 ? ' > ' : '') + suite['Suite Name'];
-                    currentSuites = suite.Child_Suites || [];
-                  } else {
+                  let found = false;
+                  
+                  // Try to find the suite at this level
+                  for (const suite of currentSuites) {
+                    if (suite.Suite_Id === suiteId) {
+                      displayName += (i > 1 ? ' > ' : '') + suite['Suite Name'];
+                      currentSuites = suite.Child_Suites || [];
+                      found = true;
+                      break;
+                    }
+                  }
+                  
+                  if (!found) {
                     displayName += (i > 1 ? ' > ' : '') + suiteId;
                     break;
                   }
@@ -259,7 +297,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
           filteredProjects.map(project => {
             const projectId = project['Project ID'];
             const isExpanded = expandedNodes[projectId] || false;
-            const projectSuites = project['Test Suites'][0]?.Suites || [];
+            const projectSuites = getProjectSuites(project);
             
             return (
               <Box key={projectId} sx={{ mb: 1 }}>

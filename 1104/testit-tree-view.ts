@@ -33,6 +33,17 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   const [searchText, setSearchText] = useState('');
   const [filteredProjects, setFilteredProjects] = useState<TestItProject[]>([]);
 
+  // Initialize with all project nodes expanded for better UX
+  useEffect(() => {
+    if (testItData.length > 0) {
+      const initialExpanded: Record<string, boolean> = {};
+      testItData.forEach(project => {
+        initialExpanded[project['Project ID']] = true;
+      });
+      setExpandedNodes(initialExpanded);
+    }
+  }, [testItData]);
+
   // Filter projects and suites based on search text
   useEffect(() => {
     if (!searchText) {
@@ -72,7 +83,8 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   };
 
   // Toggle expanded state for a node
-  const toggleExpand = (nodeId: string) => {
+  const toggleExpand = (nodeId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent event bubbling
     setExpandedNodes(prev => ({
       ...prev,
       [nodeId]: !prev[nodeId]
@@ -91,6 +103,28 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
   };
 
+  // Auto-expand parent nodes when a child is selected
+  useEffect(() => {
+    if (selectedPaths.length > 0) {
+      const newExpandedNodes = { ...expandedNodes };
+      
+      selectedPaths.forEach(path => {
+        const parts = path.split(':');
+        // Always expand the project
+        newExpandedNodes[parts[0]] = true;
+        
+        // For each level in the path, expand the parent
+        let currentPath = parts[0];
+        for (let i = 1; i < parts.length - 1; i++) {
+          currentPath += `:${parts[i]}`;
+          newExpandedNodes[currentPath] = true;
+        }
+      });
+      
+      setExpandedNodes(newExpandedNodes);
+    }
+  }, [selectedPaths]);
+
   // Render a suite node and its children recursively
   const renderSuites = (suites: Suite[], projectId: string, parentPath: string = '') => {
     return suites.map(suite => {
@@ -101,32 +135,33 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       return (
         <Box key={currentPath} sx={{ ml: parentPath ? 4 : 2, my: 0.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            {hasChildren && (
+            {hasChildren ? (
               <IconButton
                 size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleExpand(currentPath);
-                }}
+                onClick={(e) => toggleExpand(currentPath, e)}
               >
                 {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
               </IconButton>
+            ) : (
+              <Box sx={{ width: 28 }} />
             )}
-            {!hasChildren && <Box sx={{ width: 28 }} />}
             
             <Checkbox
               checked={isPathSelected(currentPath)}
               onChange={() => togglePath(currentPath)}
+              onClick={(e) => e.stopPropagation()}
               size="small"
             />
             
             <Typography 
               variant="body2" 
-              onClick={() => toggleExpand(currentPath)}
+              onClick={(e) => {
+                if (hasChildren) toggleExpand(currentPath, e);
+              }}
               sx={{ 
-                cursor: 'pointer',
+                cursor: hasChildren ? 'pointer' : 'default',
                 fontWeight: isPathSelected(currentPath) ? 'bold' : 'normal',
-                '&:hover': { textDecoration: 'underline' } 
+                '&:hover': hasChildren ? { textDecoration: 'underline' } : {}
               }}
             >
               {suite['Suite Name']}
@@ -216,47 +251,64 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
 
       {/* Tree View */}
       <Paper sx={{ maxHeight: 400, overflow: 'auto', p: 2 }}>
-        {filteredProjects.map(project => {
-          const projectId = project['Project ID'];
-          const isExpanded = expandedNodes[projectId] || false;
-          const projectSuites = project['Test Suites'][0]?.Suites || [];
-          
-          return (
-            <Box key={projectId} sx={{ mb: 1 }}>
-              <Box 
-                sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  p: 1, 
-                  borderRadius: 1,
-                  bgcolor: 'rgba(0, 0, 0, 0.04)'
-                }}
-              >
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleExpand(projectId);
+        {filteredProjects.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" align="center">
+            {testItData.length === 0 ? 'Loading TestIt data...' : 'No matching projects found'}
+          </Typography>
+        ) : (
+          filteredProjects.map(project => {
+            const projectId = project['Project ID'];
+            const isExpanded = expandedNodes[projectId] || false;
+            const projectSuites = project['Test Suites'][0]?.Suites || [];
+            
+            return (
+              <Box key={projectId} sx={{ mb: 1 }}>
+                <Box 
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    p: 1, 
+                    borderRadius: 1,
+                    bgcolor: 'rgba(0, 0, 0, 0.04)',
+                    cursor: 'pointer'
                   }}
+                  onClick={(e) => toggleExpand(projectId, e)}
                 >
-                  {isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}
-                </IconButton>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => toggleExpand(projectId, e)}
+                  >
+                    {isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}
+                  </IconButton>
+                  
+                  <Typography 
+                    variant="subtitle2" 
+                    sx={{ flexGrow: 1 }}
+                  >
+                    {project['Project Name']}
+                    {projectSuites.length > 0 && (
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                        ({projectSuites.length} suites)
+                      </Typography>
+                    )}
+                  </Typography>
+                </Box>
                 
-                <Typography 
-                  variant="subtitle2" 
-                  onClick={() => toggleExpand(projectId)}
-                  sx={{ cursor: 'pointer', flexGrow: 1 }}
-                >
-                  {project['Project Name']}
-                </Typography>
+                <Collapse in={isExpanded}>
+                  {projectSuites.length > 0 ? (
+                    renderSuites(projectSuites, projectId)
+                  ) : (
+                    <Box sx={{ ml: 4, mt: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        No test suites available
+                      </Typography>
+                    </Box>
+                  )}
+                </Collapse>
               </Box>
-              
-              <Collapse in={isExpanded}>
-                {renderSuites(projectSuites, projectId)}
-              </Collapse>
-            </Box>
-          );
-        })}
+            );
+          })
+        )}
       </Paper>
     </Box>
   );

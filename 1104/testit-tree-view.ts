@@ -7,8 +7,7 @@ import {
   IconButton,
   Chip,
   Paper,
-  Checkbox,
-  Collapse
+  Checkbox
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -16,6 +15,8 @@ import {
   ExpandMore as ExpandMoreIcon,
   ChevronRight as ChevronRightIcon
 } from '@mui/icons-material';
+import { TreeView } from '@mui/x-tree-view/TreeView';
+import { TreeItem } from '@mui/x-tree-view/TreeItem';
 import { TestItProject } from './types';
 
 interface TestItTreeViewProps {
@@ -24,35 +25,107 @@ interface TestItTreeViewProps {
   onPathsChange: (paths: string[]) => void;
 }
 
+interface ProcessedNode {
+  id: string;
+  name: string;
+  children?: ProcessedNode[];
+  testCases?: number;
+}
+
 const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   testItData,
   selectedPaths,
   onPathsChange
 }) => {
-  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [searchText, setSearchText] = useState('');
+  const [processedData, setProcessedData] = useState<ProcessedNode[]>([]);
+  const [expanded, setExpanded] = useState<string[]>([]);
 
-  // Initialize project nodes as expanded
+  // Process the data into a format suitable for TreeView
   useEffect(() => {
-    if (testItData && testItData.length > 0) {
-      const initial: Record<string, boolean> = {};
-      testItData.forEach(project => {
-        initial[project['Project ID']] = true;
-      });
-      setExpandedNodes(initial);
-    }
+    if (!testItData || testItData.length === 0) return;
+
+    const processed: ProcessedNode[] = testItData.map(project => {
+      return {
+        id: project['Project ID'],
+        name: project['Project Name'],
+        children: processTestSuites(project['Test Suites'], project['Project ID'])
+      };
+    });
+
+    setProcessedData(processed);
+    
+    // Auto-expand the first level
+    setExpanded(processed.map(p => p.id));
   }, [testItData]);
 
-  const toggleExpanded = (nodeId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setExpandedNodes(prev => ({
-      ...prev,
-      [nodeId]: !prev[nodeId]
-    }));
+  // Function to process test suites recursively
+  const processTestSuites = (suiteWrappers: any[] = [], projectId: string, parentPath: string = ''): ProcessedNode[] => {
+    if (!suiteWrappers || suiteWrappers.length === 0) return [];
+
+    const result: ProcessedNode[] = [];
+
+    suiteWrappers.forEach(wrapper => {
+      // If wrapper is a suite itself
+      if (wrapper.Suite_Id && wrapper['Suite Name']) {
+        const currentPath = parentPath 
+          ? `${parentPath}:${wrapper.Suite_Id}` 
+          : `${projectId}:${wrapper.Suite_Id}`;
+        
+        const node: ProcessedNode = {
+          id: currentPath,
+          name: wrapper['Suite Name'],
+          testCases: wrapper.Total_Test_Cases
+        };
+
+        // Check for children in both Child_Suites and Suites
+        const childSuites1 = wrapper.Child_Suites || [];
+        const childSuites2 = wrapper.Suites || [];
+        const allChildren = [...childSuites1, ...childSuites2];
+
+        if (allChildren.length > 0) {
+          node.children = processTestSuites(allChildren, projectId, currentPath);
+        }
+
+        result.push(node);
+      }
+      // If wrapper has a Suites array
+      else if (wrapper.Suites && wrapper.Suites.length > 0) {
+        result.push(...processTestSuites(wrapper.Suites, projectId, parentPath));
+      }
+    });
+
+    return result;
   };
 
-  const toggleSelection = (path: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  // Filter the processed data based on search text
+  const filteredData = searchText
+    ? processedData.filter(project => 
+        project.name.toLowerCase().includes(searchText.toLowerCase()) ||
+        filterNodes(project.children || [], searchText.toLowerCase())
+      )
+    : processedData;
+
+  // Helper function to recursively filter nodes
+  const filterNodes = (nodes: ProcessedNode[], searchText: string): boolean => {
+    for (const node of nodes) {
+      if (node.name.toLowerCase().includes(searchText)) {
+        return true;
+      }
+      if (node.children && filterNodes(node.children, searchText)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Handle expanding/collapsing nodes
+  const handleToggle = (_event: React.SyntheticEvent, nodeIds: string[]) => {
+    setExpanded(nodeIds);
+  };
+
+  // Handle checking/unchecking nodes
+  const handleSelect = (path: string) => {
     const isSelected = selectedPaths.includes(path);
     if (isSelected) {
       onPathsChange(selectedPaths.filter(p => p !== path));
@@ -61,160 +134,64 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
   };
 
-  // Filter projects by search text
-  const filteredProjects = searchText 
-    ? testItData.filter(p => p['Project Name'].toLowerCase().includes(searchText.toLowerCase()))
-    : testItData;
-
-  // Recursive function to render a suite and its children
-  const renderSuite = (
-    suite: any, 
-    projectId: string, 
-    parentPath: string = '', 
-    level: number = 0
-  ) => {
-    if (!suite || !suite.Suite_Id) return null;
-    
-    const path = parentPath 
-      ? `${parentPath}:${suite.Suite_Id}` 
-      : `${projectId}:${suite.Suite_Id}`;
-    
-    const isSelected = selectedPaths.includes(path);
-    const isExpanded = !!expandedNodes[path];
-    
-    // Get all possible children (from Child_Suites or Suites)
-    const children = [
-      ...(suite.Child_Suites || []),
-      ...(suite.Suites || [])
-    ].filter(Boolean);
-    
-    const hasChildren = children.length > 0;
-    
-    return (
-      <Box key={path}>
-        <Box 
-          sx={{ 
-            display: 'flex', 
-            alignItems: 'center',
-            pl: level * 3 + 2,
-            py: 0.5, 
-            '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' }
-          }}
-        >
-          {/* Expand/Collapse Icon */}
-          {hasChildren ? (
-            <IconButton
+  // Recursively render tree nodes
+  const renderTree = (nodes: ProcessedNode[] = []) => {
+    return nodes.map(node => (
+      <TreeItem
+        key={node.id}
+        nodeId={node.id}
+        label={
+          <Box sx={{ display: 'flex', alignItems: 'center', py: 0.5 }}>
+            <Checkbox
+              checked={selectedPaths.includes(node.id)}
+              onChange={() => handleSelect(node.id)}
+              onClick={(e) => e.stopPropagation()}
               size="small"
-              onClick={(e) => toggleExpanded(path, e)}
-            >
-              {isExpanded 
-                ? <ExpandMoreIcon fontSize="small" /> 
-                : <ChevronRightIcon fontSize="small" />
-              }
-            </IconButton>
-          ) : (
-            <Box sx={{ width: 28 }} /> 
-          )}
-          
-          {/* Checkbox */}
-          <Checkbox 
-            checked={isSelected}
-            onChange={(e) => toggleSelection(path)}
-            onClick={(e) => e.stopPropagation()}
-            size="small"
-          />
-          
-          {/* Suite Name */}
-          <Typography 
-            variant="body2"
-            onClick={() => hasChildren && toggleExpanded(path)}
-            sx={{ 
-              cursor: hasChildren ? 'pointer' : 'default',
-              fontWeight: isSelected ? 'bold' : 'normal'
-            }}
-          >
-            {suite['Suite Name']}
-            {suite.Total_Test_Cases > 0 && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                ({suite.Total_Test_Cases} tests)
-              </Typography>
-            )}
-          </Typography>
-        </Box>
-        
-        {/* Children */}
-        {hasChildren && isExpanded && (
-          <Box>
-            {children.map(child => 
-              renderSuite(child, projectId, path, level + 1)
-            )}
+            />
+            <Typography variant="body2">
+              {node.name}
+              {node.testCases && node.testCases > 0 && (
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                  ({node.testCases} tests)
+                </Typography>
+              )}
+            </Typography>
           </Box>
-        )}
-      </Box>
-    );
+        }
+      >
+        {node.children && node.children.length > 0 && renderTree(node.children)}
+      </TreeItem>
+    ));
   };
 
-  // Function to get a readable path name
+  // Function to get a human-readable path name
   const getPathName = (path: string): string => {
     const parts = path.split(':');
     if (parts.length < 2) return path;
     
-    const projectId = parts[0];
-    const project = testItData.find(p => p['Project ID'] === projectId);
-    if (!project) return path;
+    // Find each part in the processed data structure
+    let result = '';
+    let current = processedData;
+    let currentNode: ProcessedNode | undefined;
     
-    let result = project['Project Name'];
-    
-    // For each remaining part, try to find the corresponding suite name
-    for (let i = 1; i < parts.length; i++) {
-      const suiteId = parts[i];
-      let found = false;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
       
-      // Search function to find a suite by ID
-      const findSuite = (suites: any[]): any => {
-        if (!suites) return null;
-        for (const s of suites) {
-          if (!s) continue;
-          if (s.Suite_Id === suiteId) return s;
-          
-          // Look in Child_Suites
-          if (s.Child_Suites) {
-            const found = findSuite(s.Child_Suites);
-            if (found) return found;
-          }
-          
-          // Look in Suites
-          if (s.Suites) {
-            const found = findSuite(s.Suites);
-            if (found) return found;
-          }
+      // Find the node with this ID at the current level
+      currentNode = current.find(node => {
+        if (i === 0) {
+          return node.id === part;
+        } else {
+          return node.id.endsWith(part);
         }
-        return null;
-      };
+      });
       
-      // Start the search from the project's Test Suites
-      let suite = null;
-      for (const wrapper of project['Test Suites']) {
-        // If wrapper is a suite itself
-        if (wrapper.Suite_Id === suiteId) {
-          suite = wrapper;
-          break;
-        }
-        
-        // Look in wrapper's Suites
-        if (wrapper.Suites) {
-          suite = findSuite(wrapper.Suites);
-          if (suite) break;
-        }
-      }
-      
-      if (suite) {
-        result += ` > ${suite['Suite Name']}`;
-        found = true;
-      }
-      
-      if (!found) {
-        result += ` > ${suiteId}`;
+      if (currentNode) {
+        result += (result ? ' > ' : '') + currentNode.name;
+        current = currentNode.children || [];
+      } else {
+        result += (result ? ' > ' : '') + part;
+        break;
       }
     }
     
@@ -227,7 +204,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       <TextField
         fullWidth
         size="small"
-        placeholder="Search projects..."
+        placeholder="Search projects and suites..."
         value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
         sx={{ mb: 2 }}
@@ -258,7 +235,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
               <Chip
                 key={path}
                 label={getPathName(path)}
-                onDelete={() => toggleSelection(path)}
+                onDelete={() => handleSelect(path)}
                 size="small"
                 color="primary"
               />
@@ -269,7 +246,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
 
       {/* Tree View */}
       <Paper sx={{ maxHeight: 400, overflow: 'auto', p: 2 }}>
-        {!filteredProjects || filteredProjects.length === 0 ? (
+        {!filteredData || filteredData.length === 0 ? (
           <Typography variant="body2" color="text.secondary" align="center">
             {!testItData || testItData.length === 0 
               ? 'Loading TestIt data...' 
@@ -277,63 +254,16 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
             }
           </Typography>
         ) : (
-          filteredProjects.map(project => {
-            if (!project) return null;
-            
-            const projectId = project['Project ID'];
-            const isExpanded = !!expandedNodes[projectId];
-            
-            return (
-              <Box key={projectId} sx={{ mb: 2 }}>
-                {/* Project Header */}
-                <Box 
-                  onClick={() => toggleExpanded(projectId)}
-                  sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center',
-                    p: 1,
-                    bgcolor: 'rgba(0,0,0,0.04)',
-                    borderRadius: 1,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <IconButton
-                    size="small"
-                    onClick={(e) => toggleExpanded(projectId, e)}
-                  >
-                    {isExpanded 
-                      ? <ExpandMoreIcon /> 
-                      : <ChevronRightIcon />
-                    }
-                  </IconButton>
-                  <Typography variant="subtitle2">
-                    {project['Project Name']}
-                  </Typography>
-                </Box>
-                
-                {/* Project Suites */}
-                {isExpanded && project['Test Suites'] && (
-                  <Box sx={{ mt: 1 }}>
-                    {project['Test Suites'].map(wrapper => {
-                      // If the wrapper is actually a suite
-                      if (wrapper.Suite_Id && wrapper['Suite Name']) {
-                        return renderSuite(wrapper, projectId);
-                      }
-                      
-                      // If the wrapper contains suites
-                      if (wrapper.Suites && wrapper.Suites.length > 0) {
-                        return wrapper.Suites.map(suite => 
-                          renderSuite(suite, projectId)
-                        );
-                      }
-                      
-                      return null;
-                    })}
-                  </Box>
-                )}
-              </Box>
-            );
-          })
+          <TreeView
+            aria-label="test-it-tree"
+            defaultCollapseIcon={<ExpandMoreIcon />}
+            defaultExpandIcon={<ChevronRightIcon />}
+            expanded={expanded}
+            onNodeToggle={handleToggle}
+            sx={{ flexGrow: 1, overflowY: 'auto' }}
+          >
+            {renderTree(filteredData)}
+          </TreeView>
         )}
       </Paper>
     </Box>

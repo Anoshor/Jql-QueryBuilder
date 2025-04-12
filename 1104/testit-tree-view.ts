@@ -30,55 +30,81 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   const [searchText, setSearchText] = useState('');
   const [treeItems, setTreeItems] = useState<TreeViewBaseItem[]>([]);
   
-  // Transform the testItData into the format expected by RichTreeView
+  // Process the testItData into the format expected by RichTreeView
   useEffect(() => {
+    console.log('Processing TestIt data', testItData?.length || 0, 'projects');
     if (!testItData || testItData.length === 0) return;
     
-    const items: TreeViewBaseItem[] = testItData.map(project => ({
-      id: project['Project ID'],
-      label: project['Project Name'],
-      children: processTestSuites(project['Test Suites'], project['Project ID'])
-    }));
-    
-    setTreeItems(items);
+    try {
+      const items: TreeViewBaseItem[] = testItData.map(project => ({
+        id: project['Project ID'],
+        label: project['Project Name'],
+        children: processTopLevelSuites(project)
+      }));
+      
+      setTreeItems(items);
+      console.log('Processed tree items', items.length);
+    } catch (error) {
+      console.error('Error processing TestIt data:', error);
+    }
   }, [testItData]);
   
-  // Process test suites recursively to build the tree structure
-  const processTestSuites = (suiteWrappers: any[] = [], projectId: string, parentPath: string = ''): TreeViewBaseItem[] => {
-    if (!suiteWrappers || suiteWrappers.length === 0) return [];
+  // Process the top-level suites (Project_Test_Suites array)
+  const processTopLevelSuites = (project: TestItProject): TreeViewBaseItem[] => {
+    if (!project['Test Suites'] || project['Test Suites'].length === 0) {
+      return [];
+    }
     
-    const result: TreeViewBaseItem[] = [];
-    
-    suiteWrappers.forEach(wrapper => {
-      // If wrapper is a suite itself
-      if (wrapper.Suite_Id && wrapper['Suite Name']) {
-        const currentPath = parentPath 
-          ? `${parentPath}:${wrapper.Suite_Id}` 
-          : `${projectId}:${wrapper.Suite_Id}`;
-        
-        const node: TreeViewBaseItem = {
-          id: currentPath,
-          label: wrapper['Suite Name'] + (wrapper.Total_Test_Cases ? ` (${wrapper.Total_Test_Cases} tests)` : '')
-        };
-        
-        // Check for children in both Child_Suites and Suites
-        const childSuites1 = wrapper.Child_Suites || [];
-        const childSuites2 = wrapper.Suites || [];
-        const allChildren = [...childSuites1, ...childSuites2];
-        
-        if (allChildren.length > 0) {
-          node.children = processTestSuites(allChildren, projectId, currentPath);
-        }
-        
-        result.push(node);
-      }
-      // If wrapper has a Suites array
-      else if (wrapper.Suites && wrapper.Suites.length > 0) {
-        result.push(...processTestSuites(wrapper.Suites, projectId, parentPath));
-      }
+    // Process each top-level suite
+    return project['Test Suites'].map(topSuite => {
+      const topSuiteId = `${project['Project ID']}:${topSuite.Suite_Id}`;
+      
+      return {
+        id: topSuiteId,
+        label: topSuite['Suite Name'] + (topSuite.Total_Test_Cases ? ` (${topSuite.Total_Test_Cases} tests)` : ''),
+        children: processSecondLevelSuites(topSuite.Suites || [], topSuiteId)
+      };
     });
+  };
+  
+  // Process second-level suites (Suites array of a top-level suite)
+  const processSecondLevelSuites = (suites: any[], parentId: string): TreeViewBaseItem[] => {
+    if (!suites || suites.length === 0) {
+      return [];
+    }
     
-    return result;
+    return suites.map(suite => {
+      const suiteId = `${parentId}:${suite.Suite_Id}`;
+      
+      // Check if this suite has child suites
+      const hasChildren = suite.Suites && suite.Suites.length > 0;
+      
+      return {
+        id: suiteId,
+        label: suite['Suite Name'] + (suite.Total_Test_Cases ? ` (${suite.Total_Test_Cases} tests)` : ''),
+        children: hasChildren ? processThirdLevelSuites(suite.Suites, suiteId) : []
+      };
+    });
+  };
+  
+  // Process third-level suites (and potentially deeper)
+  const processThirdLevelSuites = (suites: any[], parentId: string): TreeViewBaseItem[] => {
+    if (!suites || suites.length === 0) {
+      return [];
+    }
+    
+    return suites.map(suite => {
+      const suiteId = `${parentId}:${suite.Suite_Id}`;
+      
+      // Recursively process any deeper levels
+      const hasChildren = suite.Suites && suite.Suites.length > 0;
+      
+      return {
+        id: suiteId,
+        label: suite['Suite Name'] + (suite.Total_Test_Cases ? ` (${suite.Total_Test_Cases} tests)` : ''),
+        children: hasChildren ? processThirdLevelSuites(suite.Suites, suiteId) : []
+      };
+    });
   };
   
   // Filter the tree items based on search text
@@ -112,68 +138,65 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       .filter((item): item is TreeViewBaseItem => item !== null);
   };
   
-  // Convert the selected item IDs to readable names
+  // Get a human-readable name for a path
   const getPathName = (path: string): string => {
     const parts = path.split(':');
     if (parts.length < 2) return path;
     
     const projectId = parts[0];
-    const project = testItData.find(p => p['Project ID'] === projectId);
+    const project = testItData?.find(p => p['Project ID'] === projectId);
     if (!project) return path;
     
-    let result = project['Project Name'];
+    const result: string[] = [project['Project Name']];
     
-    // Helper function to find a suite by its path
-    const findSuite = (path: string): string | null => {
-      const allParts = path.split(':');
-      if (allParts.length < 2) return null;
+    // Function to find a suite by its path parts
+    const findSuiteName = (project: TestItProject, pathParts: string[]): string[] => {
+      if (pathParts.length < 2) return [];
       
-      let currentNode: TreeViewBaseItem | undefined;
-      let currentItems = treeItems;
+      const names: string[] = [];
       
-      // Find the project node
-      currentNode = currentItems.find(item => item.id === allParts[0]);
-      if (!currentNode || !currentNode.children) return null;
+      // First try to find the top-level suite
+      const topSuiteId = pathParts[1];
+      const topSuite = project['Test Suites']?.find(s => s.Suite_Id === topSuiteId);
       
-      currentItems = currentNode.children;
+      if (!topSuite) return names;
       
-      // Navigate through the rest of the path
-      for (let i = 1; i < allParts.length; i++) {
-        const currentPath = allParts.slice(0, i + 1).join(':');
-        currentNode = currentItems.find(item => item.id === currentPath);
+      names.push(topSuite['Suite Name']);
+      
+      if (pathParts.length < 3) return names;
+      
+      // Now try to find second-level suite
+      const secondSuiteId = pathParts[2];
+      const secondSuite = topSuite.Suites?.find((s: any) => s.Suite_Id === secondSuiteId);
+      
+      if (!secondSuite) return names;
+      
+      names.push(secondSuite['Suite Name']);
+      
+      if (pathParts.length < 4) return names;
+      
+      // Continue for deeper levels
+      let currentSuites = secondSuite.Suites;
+      for (let i = 3; i < pathParts.length; i++) {
+        if (!currentSuites) break;
         
-        if (!currentNode) return null;
+        const suiteId = pathParts[i];
+        const suite = currentSuites.find((s: any) => s.Suite_Id === suiteId);
         
-        // Remove any "(X tests)" suffix from the label
-        const label = currentNode.label.replace(/\s*\(\d+\s*tests\)$/, '');
+        if (!suite) break;
         
-        if (currentPath === path) {
-          return label;
-        }
-        
-        if (!currentNode.children) return null;
-        currentItems = currentNode.children;
+        names.push(suite['Suite Name']);
+        currentSuites = suite.Suites;
       }
       
-      return null;
+      return names;
     };
     
-    // For each part, build the path
-    let currentPath = projectId;
-    for (let i = 1; i < parts.length; i++) {
-      currentPath += `:${parts[i]}`;
-      const suiteName = findSuite(currentPath);
-      
-      if (suiteName) {
-        result += ` > ${suiteName}`;
-      } else {
-        result += ` > ${parts[i]}`;
-      }
-    }
-    
-    return result;
+    // Get suite names and add them to the result
+    const suiteNames = findSuiteName(project, parts);
+    return result.concat(suiteNames).join(' > ');
   };
-
+  
   // Handle selection change
   const handleSelectionChange = (event: React.SyntheticEvent, nodeIds: string[]) => {
     onPathsChange(nodeIds);
@@ -230,11 +253,11 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       
       {/* Tree View */}
       <Paper sx={{ maxHeight: 400, overflow: 'auto', p: 2 }}>
-        {!filteredItems || filteredItems.length === 0 ? (
+        {(!treeItems || treeItems.length === 0) ? (
           <Typography variant="body2" color="text.secondary" align="center">
             {!testItData || testItData.length === 0 
               ? 'Loading TestIt data...' 
-              : 'No matching items found'
+              : 'No test suites available'
             }
           </Typography>
         ) : (

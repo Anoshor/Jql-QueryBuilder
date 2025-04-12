@@ -6,15 +6,18 @@ import {
   InputAdornment,
   IconButton,
   Chip,
-  Paper
+  Paper,
+  Checkbox,
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Clear as ClearIcon
+  Clear as ClearIcon,
+  ExpandMore as ExpandMoreIcon,
+  ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
-import { RichTreeView } from '@mui/x-tree-view/RichTreeView';
-import { TreeViewBaseItem } from '@mui/x-tree-view/models';
-import { TestItProject, Suite } from './types';
+import TreeView from '@mui/lab/TreeView';
+import TreeItem from '@mui/lab/TreeItem';
+import { TestItProject } from './types';
 
 interface TestItTreeViewProps {
   testItData: TestItProject[];
@@ -22,296 +25,229 @@ interface TestItTreeViewProps {
   onPathsChange: (paths: string[]) => void;
 }
 
+/**
+ * A multi-level tree for selecting TestIt suites.
+ * Each suite is represented by "projectId:suiteId:childSuiteId..."
+ */
 const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   testItData,
   selectedPaths,
-  onPathsChange
+  onPathsChange,
 }) => {
+  // Which nodes are expanded in the TreeView
+  const [expanded, setExpanded] = useState<string[]>([]);
+
+  // For filtering top-level projects by name
   const [searchText, setSearchText] = useState('');
-  const [treeItems, setTreeItems] = useState<TreeViewBaseItem[]>([]);
 
-  // This effect transforms your MongoDB data structure into the format expected by RichTreeView
+  /**
+   * Expand all top-level projects by default (their nodeIds = project['Project ID']).
+   * If you want to expand all suites as well, you'd do a recursive approach or handle it differently.
+   */
   useEffect(() => {
-    if (!testItData || testItData.length === 0) return;
-    
-    // Start by creating an array of TreeViewBaseItem for each project
-    const items: TreeViewBaseItem[] = [];
-
-    // For each project in your data
-    testItData.forEach(project => {
-      // Create a project node
-      const projectNode: TreeViewBaseItem = {
-        id: project['Project ID'],  // This will be the first part of the path
-        label: project['Project Name'],
-        children: []
-      };
-
-      // IMPORTANT: Process all Test_Suites for this project
-      if (project['Test Suites'] && project['Test Suites'].length > 0) {
-        
-        // For each top-level suite in the project
-        project['Test Suites'].forEach(topLevelSuite => {
-          // Check if the Test_Suites item itself is a suite
-          if (topLevelSuite.Suite_Id && topLevelSuite['Suite Name']) {
-            // Create a node for this top-level suite
-            const suiteNode = processTopLevelSuite(topLevelSuite, project['Project ID']);
-            projectNode.children.push(suiteNode);
-          }
-          
-          // Some projects might have suites inside a wrapper
-          // If this top-level item has Suites property with child suites
-          if (topLevelSuite.Suites && topLevelSuite.Suites.length > 0) {
-            // Process all child suites
-            topLevelSuite.Suites.forEach(childSuite => {
-              // Create a path for this child suite using project ID and suite ID
-              const suiteNode = processSecondLevelSuite(childSuite, project['Project ID'], topLevelSuite.Suite_Id);
-              projectNode.children.push(suiteNode);
-            });
-          }
-        });
-      }
-      
-      // Add the complete project node to our items array
-      items.push(projectNode);
-    });
-    
-    setTreeItems(items);
-    console.log("TreeItems created:", items.length, "projects");
+    if (testItData && testItData.length > 0) {
+      const topLevelIds = testItData.map((p) => p['Project ID']);
+      setExpanded(topLevelIds);
+    }
   }, [testItData]);
 
-  // Helper function to process a top-level suite
-  // This creates a TreeViewBaseItem for a suite and processes its children
-  const processTopLevelSuite = (suite: Suite, projectId: string): TreeViewBaseItem => {
-    // The path for this suite is projectId:suiteId
-    const path = `${projectId}:${suite.Suite_Id}`;
-    
-    // Create the base item for this suite
-    const suiteNode: TreeViewBaseItem = {
-      id: path,  // This is the path that will be used for selection
-      label: suite['Suite Name'] + (suite.Total_Test_Cases ? ` (${suite.Total_Test_Cases} tests)` : ''),
-      children: []
-    };
-    
-    // Process any child suites - look in both Suites and Child_Suites
-    const childSuites = [
-      ...(suite.Suites || []),
-      ...(suite.Child_Suites || [])
-    ].filter(Boolean);
-    
-    // For each child suite, recursively process it
-    if (childSuites.length > 0) {
-      childSuites.forEach(childSuite => {
-        if (childSuite && childSuite.Suite_Id) {
-          // For each child, create a new node with path extended with this suite's ID
-          const childNode = processSecondLevelSuite(childSuite, projectId, suite.Suite_Id);
-          suiteNode.children.push(childNode);
-        }
-      });
-    }
-    
-    return suiteNode;
+  /**
+   * Called by MUI TreeView whenever a node is expanded or collapsed.
+   * 'nodeIds' is the updated list of expanded node IDs.
+   */
+  const handleToggle = (event: React.SyntheticEvent, nodeIds: string[]) => {
+    setExpanded(nodeIds);
   };
 
-  // Helper function to process a second-level suite
-  // Similar to processTopLevelSuite but adds one more level to the path
-  const processSecondLevelSuite = (suite: Suite, projectId: string, parentSuiteId: string): TreeViewBaseItem => {
-    // The path for this suite is projectId:parentSuiteId:suiteId
-    const path = `${projectId}:${parentSuiteId}:${suite.Suite_Id}`;
-    
-    // Create the base item for this suite
-    const suiteNode: TreeViewBaseItem = {
-      id: path,
-      label: suite['Suite Name'] + (suite.Total_Test_Cases ? ` (${suite.Total_Test_Cases} tests)` : ''),
-      children: []
-    };
-    
-    // Process any third-level suites - look in both Suites and Child_Suites
-    const childSuites = [
-      ...(suite.Suites || []),
-      ...(suite.Child_Suites || [])
-    ].filter(Boolean);
-    
-    // For each child suite, recursively process it
-    if (childSuites.length > 0) {
-      childSuites.forEach(childSuite => {
-        if (childSuite && childSuite.Suite_Id) {
-          // For each child, create a new node with path extended with this suite's ID
-          const childNode = processThirdLevelSuite(childSuite, projectId, parentSuiteId, suite.Suite_Id);
-          suiteNode.children.push(childNode);
-        }
-      });
+  /**
+   * Add or remove a suite path from the array of selectedPaths.
+   */
+  const toggleSelection = (path: string) => {
+    if (selectedPaths.includes(path)) {
+      onPathsChange(selectedPaths.filter((p) => p !== path));
+    } else {
+      onPathsChange([...selectedPaths, path]);
     }
-    
-    return suiteNode;
   };
 
-  // Helper function to process a third-level suite
-  // This completes our 3-level handling as requested, but you can go deeper if needed
-  const processThirdLevelSuite = (
-    suite: Suite, 
-    projectId: string, 
-    grandparentSuiteId: string, 
-    parentSuiteId: string
-  ): TreeViewBaseItem => {
-    // The path for this suite is projectId:grandparentSuiteId:parentSuiteId:suiteId
-    const path = `${projectId}:${grandparentSuiteId}:${parentSuiteId}:${suite.Suite_Id}`;
-    
-    // Create the base item for this suite
-    const suiteNode: TreeViewBaseItem = {
-      id: path,
-      label: suite['Suite Name'] + (suite.Total_Test_Cases ? ` (${suite.Total_Test_Cases} tests)` : ''),
-      children: []
-    };
-    
-    // Process any fourth-level suites - look in both Suites and Child_Suites
-    // You can add more levels if needed by repeating this pattern
-    const childSuites = [
+  /**
+   * Filter the top-level projects by the search text (project name).
+   * If you also want to filter suite names, you'd do deeper recursion. 
+   * Currently we only filter at the project level.
+   */
+  const filteredProjects = searchText
+    ? testItData.filter((p) =>
+        p['Project Name'].toLowerCase().includes(searchText.toLowerCase())
+      )
+    : testItData;
+
+  /**
+   * Recursively render a suite as a TreeItem, including child suites.
+   */
+  const renderSuiteItem = (
+    suite: any,
+    projectId: string,
+    parentPath: string = ''
+  ): React.ReactNode => {
+    if (!suite || !suite.Suite_Id) return null;
+
+    // Build the "projectId:suiteId" or deeper path
+    const thisPath = parentPath
+      ? `${parentPath}:${suite.Suite_Id}`
+      : `${projectId}:${suite.Suite_Id}`;
+
+    // We combine Child_Suites and Suites into a single children array
+    const children = [
+      ...(suite.Child_Suites || []),
       ...(suite.Suites || []),
-      ...(suite.Child_Suites || [])
     ].filter(Boolean);
-    
-    // For each child suite, you could process further levels if needed
-    if (childSuites.length > 0) {
-      childSuites.forEach(childSuite => {
-        if (childSuite && childSuite.Suite_Id) {
-          // For deeper levels, you would create another helper function
-          // For now, we'll just create leaf nodes (no more children)
-          const childPath = `${path}:${childSuite.Suite_Id}`;
-          const childNode: TreeViewBaseItem = {
-            id: childPath,
-            label: childSuite['Suite Name'] + 
-                  (childSuite.Total_Test_Cases ? ` (${childSuite.Total_Test_Cases} tests)` : '')
-          };
-          suiteNode.children.push(childNode);
-        }
-      });
-    }
-    
-    return suiteNode;
+
+    // Is this suite's path currently selected?
+    const isSelected = selectedPaths.includes(thisPath);
+
+    // We'll show a checkbox + suite name for the label
+    const label = (
+      <Box
+        sx={{ display: 'flex', alignItems: 'center' }}
+        onClick={(e) => {
+          // Prevent expanding/collapsing when clicking the label's interior elements
+          e.stopPropagation();
+        }}
+      >
+        <Checkbox
+          size="small"
+          checked={isSelected}
+          onChange={() => toggleSelection(thisPath)}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <Typography
+          variant="body2"
+          sx={{ fontWeight: isSelected ? 'bold' : 'normal' }}
+        >
+          {suite['Suite Name']}
+        </Typography>
+        {suite.Total_Test_Cases ? (
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+            ({suite.Total_Test_Cases} tests)
+          </Typography>
+        ) : null}
+      </Box>
+    );
+
+    return (
+      <TreeItem
+        key={thisPath}
+        nodeId={thisPath}
+        label={label}
+      >
+        {/* Recursively render child suites */}
+        {children.map((child: any) =>
+          renderSuiteItem(child, projectId, thisPath)
+        )}
+      </TreeItem>
+    );
   };
 
-  // Filter items based on search text
-  const filteredItems = React.useMemo(() => {
-    if (!searchText) return treeItems;
-    
-    const searchLower = searchText.toLowerCase();
-    
-    // Helper function to recursively filter tree items
-    const filterItems = (items: TreeViewBaseItem[]): TreeViewBaseItem[] => {
-      return items
-        .map(item => {
-          const matches = item.label.toLowerCase().includes(searchLower);
-          
-          // Process children
-          let filteredChildren: TreeViewBaseItem[] = [];
-          if (item.children && item.children.length > 0) {
-            filteredChildren = filterItems(item.children);
+  /**
+   * Render a top-level project as a TreeItem. 
+   * Each project's ID is the nodeId. 
+   * Then each "Test Suite" inside it is rendered with `renderSuiteItem`.
+   */
+  const renderProjectItem = (project: TestItProject) => {
+    const projectId = project['Project ID'];
+    return (
+      <TreeItem
+        key={projectId}
+        nodeId={projectId}
+        label={
+          <Typography variant="subtitle2">{project['Project Name']}</Typography>
+        }
+      >
+        {project['Test Suites'].map((suiteWrapper) => {
+          // Some data might store a direct suite or an object that has .Suites
+          if (suiteWrapper.Suite_Id) {
+            return renderSuiteItem(suiteWrapper, projectId);
           }
-          
-          // Keep if it matches or has matching children
-          if (matches || filteredChildren.length > 0) {
-            return {
-              ...item,
-              children: filteredChildren
-            };
+          if (suiteWrapper.Suites) {
+            return suiteWrapper.Suites.map((suite: any) =>
+              renderSuiteItem(suite, projectId)
+            );
           }
-          
           return null;
-        })
-        .filter((item): item is TreeViewBaseItem => item !== null);
-    };
-    
-    return filterItems(treeItems);
-  }, [searchText, treeItems]);
+        })}
+      </TreeItem>
+    );
+  };
 
-  // Get readable path name for display in the selected chips
-  // This converts "projectId:suiteId:childSuiteId" to "Project > Suite > ChildSuite"
-  const getPathDisplayName = (path: string): string => {
+  /**
+   * Convert a path "projectId:suiteId:childSuiteId" to a human-readable chain 
+   * like "Project Name > Suite Name > Child Suite Name".
+   */
+  const getPathName = (path: string): string => {
     const parts = path.split(':');
+    if (parts.length < 1) return path;
+
+    // The first part is the projectId
     const projectId = parts[0];
-    
-    // Find the project
-    const project = testItData?.find(p => p['Project ID'] === projectId);
+    const project = testItData.find((p) => p['Project ID'] === projectId);
     if (!project) return path;
-    
-    // Start with the project name
+
     let result = project['Project Name'];
-    
-    // If there are more parts, we need to find each suite in the hierarchy
-    if (parts.length > 1) {
-      // Find suite by recursively searching through the structure
-      const findSuiteById = (
-        suites: Suite[] | undefined, 
-        suiteId: string
-      ): Suite | null => {
-        if (!suites || suites.length === 0) return null;
-        
-        for (const suite of suites) {
-          if (!suite) continue;
-          
-          // Check if this is the suite we're looking for
-          if (suite.Suite_Id === suiteId) {
-            return suite;
-          }
-          
-          // Check in Child_Suites
-          if (suite.Child_Suites) {
-            const found = findSuiteById(suite.Child_Suites, suiteId);
-            if (found) return found;
-          }
-          
-          // Check in Suites
-          if (suite.Suites) {
-            const found = findSuiteById(suite.Suites, suiteId);
-            if (found) return found;
-          }
+
+    // For deeper parts, we look up the suite by ID
+    let currentSuites = project['Test Suites'];
+    for (let i = 1; i < parts.length; i++) {
+      const suiteId = parts[i];
+
+      // Helper to recursively find suite by ID
+      const findSuite = (suites: any[] = [], id: string): any => {
+        for (const s of suites) {
+          if (!s) continue;
+          if (s.Suite_Id === id) return s;
+          const inChild = findSuite(s.Child_Suites, id);
+          if (inChild) return inChild;
+          const inNested = findSuite(s.Suites, id);
+          if (inNested) return inNested;
         }
-        
         return null;
       };
-      
-      // For each part of the path (after the project ID)
-      for (let i = 1; i < parts.length; i++) {
-        const suiteId = parts[i];
-        let found = false;
-        
-        // Try to find the suite in the project's Test_Suites
-        for (const topSuite of project['Test Suites']) {
-          // Check if this top suite is the one we're looking for
-          if (topSuite.Suite_Id === suiteId) {
-            result += ` > ${topSuite['Suite Name']}`;
-            found = true;
-            break;
-          }
-          
-          // If not, check in its Suites
-          if (topSuite.Suites) {
-            const suite = findSuiteById(topSuite.Suites, suiteId);
-            if (suite) {
-              result += ` > ${suite['Suite Name']}`;
-              found = true;
-              break;
-            }
-          }
+
+      let suiteMatch: any = null;
+      // Some testIt data has top-level "suiteWrapper" with .Suite_Id or .Suites
+      for (const wrapper of currentSuites) {
+        if (!wrapper) continue;
+        if (wrapper.Suite_Id === suiteId) {
+          suiteMatch = wrapper;
+          break;
         }
-        
-        // If we couldn't find this suite, just use the ID
-        if (!found) {
-          result += ` > ${suiteId}`;
+        if (wrapper.Suites) {
+          suiteMatch = findSuite(wrapper.Suites, suiteId);
+          if (suiteMatch) break;
         }
       }
+
+      if (suiteMatch) {
+        result += ` > ${suiteMatch['Suite Name']}`;
+        // Next iteration must look for deeper children in suiteMatch
+        currentSuites = [
+          ...(suiteMatch.Child_Suites || []),
+          ...(suiteMatch.Suites || []),
+        ];
+      } else {
+        result += ` > ${suiteId}`;
+      }
     }
-    
+
     return result;
   };
 
   return (
     <Box>
-      {/* Search Box */}
+      {/* Search box (only searching top-level project names) */}
       <TextField
         fullWidth
         size="small"
-        placeholder="Search projects and suites..."
+        placeholder="Search projects..."
         value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
         sx={{ mb: 2 }}
@@ -330,23 +266,19 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
           ),
         }}
       />
-      
-      {/* Selected Paths */}
+
+      {/* Display all selected paths as chips */}
       {selectedPaths.length > 0 && (
         <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
           <Typography variant="body2" gutterBottom>
             Selected Paths ({selectedPaths.length}):
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {selectedPaths.map(path => (
+            {selectedPaths.map((path) => (
               <Chip
                 key={path}
-                label={getPathDisplayName(path)}
-                onDelete={() => {
-                  // Remove this path from selection
-                  const newSelection = selectedPaths.filter(p => p !== path);
-                  onPathsChange(newSelection);
-                }}
+                label={getPathName(path)}
+                onDelete={() => toggleSelection(path)}
                 size="small"
                 color="primary"
               />
@@ -354,44 +286,29 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
           </Box>
         </Box>
       )}
-      
-      {/* Tree View */}
+
+      {/* The actual TreeView */}
       <Paper sx={{ maxHeight: 400, overflow: 'auto', p: 2 }}>
-        {treeItems.length === 0 ? (
+        {!filteredProjects || filteredProjects.length === 0 ? (
           <Typography variant="body2" color="text.secondary" align="center">
-            {!testItData || testItData.length === 0 
-              ? 'Loading TestIt data...' 
-              : 'No test suites available'
-            }
+            {!testItData || testItData.length === 0
+              ? 'Loading TestIt data...'
+              : 'No matching projects found'}
           </Typography>
         ) : (
-          <RichTreeView
-            aria-label="test-it-paths"
-            multiSelect
-            checkboxSelection
-            items={filteredItems}
-            selected={selectedPaths}
-            onSelectedChange={(event, nodeIds) => onPathsChange(nodeIds)}
-            defaultExpandedItems={treeItems.map(item => item.id)} // Auto-expand projects
-          />
+          <TreeView
+            expanded={expanded}
+            onNodeToggle={handleToggle}
+            defaultCollapseIcon={<ExpandMoreIcon />}
+            defaultExpandIcon={<ChevronRightIcon />}
+          >
+            {filteredProjects.map((project) => {
+              if (!project) return null;
+              return renderProjectItem(project);
+            })}
+          </TreeView>
         )}
       </Paper>
-      
-      {/* DEBUG VIEW - Uncomment this to debug data conversion issues */}
-      {/*
-      <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-        <Typography variant="subtitle2">Debug Info:</Typography>
-        <Typography variant="body2">
-          Original Projects: {testItData?.length || 0}
-        </Typography>
-        <Typography variant="body2">
-          Tree Items: {treeItems.length}
-        </Typography>
-        <Typography variant="body2">
-          Selected Paths: {selectedPaths.length}
-        </Typography>
-      </Box>
-      */}
     </Box>
   );
 };

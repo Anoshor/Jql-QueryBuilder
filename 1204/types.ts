@@ -1,5 +1,4 @@
 // ========== BASIC PROJECT TYPES ==========
-
 // A basic project from your data
 export interface Project {
   id: string;
@@ -24,11 +23,10 @@ export interface Team {
 }
 
 // ========== TESTIT RELATED TYPES ==========
-
 // Interface that reflects your MongoDB "Suite" structure
 export interface Suite {
   Suite_Id: string;
-  'Suite Name': string;
+  Suite_Name: string;
   Suites?: Suite[];
   Child_Suites?: Suite[];
   Total_Test_Cases?: number;
@@ -52,7 +50,6 @@ export interface TestItProject {
 export type TestItData = TestItProject[];
 
 // ========== SONAR RELATED TYPES ==========
-
 // Single Sonar project item
 export interface SonarProject {
   project: string;
@@ -69,7 +66,6 @@ export interface SonarDomain {
 export type SonarData = SonarDomain[];
 
 // ========== TEAM CONFIGURATION ==========
-
 // Sonar config for a team: domain plus selected project IDs
 export interface SonarProjectConfig {
   sonarDomain: string;
@@ -83,7 +79,6 @@ export interface TeamConfig {
 }
 
 // ========== ORGANIZATION CONFIG PAYLOADS ==========
-
 export interface OrganizationConfigPayload {
   organization: string;
   projects: Record<
@@ -95,7 +90,7 @@ export interface OrganizationConfigPayload {
         name: string;
         members: string[];
         testItPaths: string[]; // changed from testItProjects
-        sonarQubeProjects: Array<Record<string, string[]>>;
+        sonarQubeProjects: SonarProjectConfig[];
       }>;
     }
   >;
@@ -121,7 +116,7 @@ export interface TeamData {
   name: string;
   members: string[];
   testItPaths: string[]; // changed from testItProjects
-  sonarQubeProjects: Array<Record<string, string[]>>;
+  sonarQubeProjects: SonarProjectConfig[];
   scrumBoardId: string;
   scrumBoardName: string;
   storyPointsPerMemberPerSprint: number;

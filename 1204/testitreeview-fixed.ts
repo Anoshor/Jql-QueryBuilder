@@ -7,10 +7,17 @@ import {
   IconButton,
   Chip,
   Paper,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
+  Badge,
 } from '@mui/material';
 import {
   Search as SearchIcon,
   Clear as ClearIcon,
+  FolderOpen as FolderIcon,
+  CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
 import { RichTreeView } from '@mui/x-tree-view/RichTreeView';
 import { TreeViewBaseItem } from '@mui/x-tree-view/models';
@@ -31,6 +38,11 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   const [expanded, setExpanded] = useState<string[]>([]);
   // For filtering top-level projects by name
   const [searchText, setSearchText] = useState('');
+  // For debugging - display paths being processed
+  const [debugInfo, setDebugInfo] = useState<{paths: string[], treeItems: any[]}>({
+    paths: [],
+    treeItems: []
+  });
 
   /**
    * Expand all top-level projects by default (using their IDs).
@@ -42,11 +54,23 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
   }, [testItData]);
 
+  /**
+   * Log selected paths on change for debugging
+   */
+  useEffect(() => {
+    console.log("Current selectedPaths:", selectedPaths);
+  }, [selectedPaths]);
+
   const toggleSelection = (path: string) => {
+    console.log("Toggle selection for path:", path);
     if (selectedPaths.includes(path)) {
-      onPathsChange(selectedPaths.filter((p) => p !== path));
+      const newPaths = selectedPaths.filter((p) => p !== path);
+      console.log("Removing path, new paths:", newPaths);
+      onPathsChange(newPaths);
     } else {
-      onPathsChange([...selectedPaths, path]);
+      const newPaths = [...selectedPaths, path];
+      console.log("Adding path, new paths:", newPaths);
+      onPathsChange(newPaths);
     }
   };
 
@@ -66,19 +90,16 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   const generateUniqueId = () => `generated-id-${idCounter++}`;
 
   const convertProjectToTreeItem = (project: TestItProject): TreeViewBaseItem => {
-    let id = project.Project_Id || project.id;
-    if (!id) {
-      id = generateUniqueId();
-    }
+    const id = project.Project_Id || project.id || generateUniqueId();
     
     return {
       id,
       label: project.Project_Name || 'Unnamed Project',
-      children: project.Project_Test_Suites?.map(suite => convertSuiteToTreeItem(suite, id)) || undefined,
+      children: project.Project_Test_Suites?.map(suite => convertSuiteToTreeItem(suite, id)) || [],
     };
   };
 
-  const convertSuiteToTreeItem = (suite: Suite, projectId: string): TreeViewBaseItem => {
+  const convertSuiteToTreeItem = (suite: Suite, projectId: string, parentPath: string = ""): TreeViewBaseItem => {
     if (!suite) return null;
     
     const id = suite.Suite_Id;
@@ -90,10 +111,12 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
 
     // Create a path-based ID using the project ID and suite ID
-    const itemId = `${projectId}:${id}`;
+    const thisPath = parentPath 
+      ? `${parentPath}:${id}`
+      : `${projectId}:${id}`;
     
     const treeItem: TreeViewBaseItem = {
-      id: itemId,
+      id: thisPath,
       label: suite.Suite_Name || 'Unnamed Suite',
     };
 
@@ -105,7 +128,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     // Add children if they exist
     if (suite.Suites?.length) {
       treeItem.children = suite.Suites.map(childSuite => 
-        convertSuiteToTreeItem(childSuite, projectId)
+        convertSuiteToTreeItem(childSuite, projectId, thisPath)
       );
     }
 
@@ -120,10 +143,18 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       return [];
     }
     
-    return filteredProjects
+    const treeItems = filteredProjects
       .filter(Boolean)
       .map(convertProjectToTreeItem)
-      .filter(Boolean); // Filter out any nulls that might have been created
+      .filter(Boolean);
+    
+    // For debugging
+    setDebugInfo({
+      paths: selectedPaths,
+      treeItems
+    });
+    
+    return treeItems;
   };
 
   /**
@@ -189,9 +220,15 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
    * Handle checkbox selection changes from RichTreeView
    */
   const handleSelectionChange = (newSelectedIds: string[]) => {
+    console.log("handleSelectionChange received:", newSelectedIds);
+    
+    // Filter out any project-level IDs that are not path-based (shouldn't be selectable)
+    const validPathIds = newSelectedIds.filter(id => id.includes(':'));
+    
     // Only update if there's a change
-    if (JSON.stringify(newSelectedIds.sort()) !== JSON.stringify(selectedPaths.sort())) {
-      onPathsChange(newSelectedIds);
+    if (JSON.stringify(validPathIds.sort()) !== JSON.stringify(selectedPaths.sort())) {
+      console.log("Updating paths to:", validPathIds);
+      onPathsChange(validPathIds);
     }
   };
 
@@ -225,21 +262,38 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
       
       {/* Display selected paths as chips */}
       {selectedPaths.length > 0 && (
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Selected Paths ({selectedPaths.length}):
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {selectedPaths.map((path) => (
-              <Chip
-                key={path}
-                label={getPathName(path)}
-                onDelete={() => toggleSelection(path)}
-                size="small"
-                color="primary"
-              />
-            ))}
+        <Paper sx={{ p: 2, mb: 2, maxHeight: '200px', overflow: 'auto' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <CheckCircleIcon color="success" fontSize="small" sx={{ mr: 1 }} />
+            <Typography variant="subtitle2">
+              Selected Paths ({selectedPaths.length}):
+            </Typography>
           </Box>
+          <Divider sx={{ mb: 1 }} />
+          <List dense>
+            {selectedPaths.map((path) => (
+              <ListItem
+                key={path}
+                secondaryAction={
+                  <IconButton edge="end" size="small" onClick={() => toggleSelection(path)}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                }
+                sx={{ 
+                  py: 0.5, 
+                  bgcolor: 'background.default',
+                  mb: 0.5,
+                  borderRadius: 1,
+                  '&:hover': { bgcolor: 'action.hover' } 
+                }}
+              >
+                <ListItemText 
+                  primary={getPathName(path)} 
+                  primaryTypographyProps={{ variant: 'body2' }}
+                />
+              </ListItem>
+            ))}
+          </List>
         </Paper>
       )}
       
@@ -251,17 +305,37 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
             : 'No projects match your search.'}
         </Typography>
       ) : (
-        <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 1, p: 1 }}>
-          <RichTreeView
-            expanded={expanded}
-            onExpandedChange={handleToggle}
-            selected={selectedPaths}
-            onSelectedChange={handleSelectionChange}
-            items={processTestItData()}
-            checkboxSelection
-            multiSelect
-          />
-        </Box>
+        <Paper sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+          <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+            <FolderIcon fontSize="small" sx={{ mr: 1 }} />
+            Select Test Suites
+            <Badge 
+              badgeContent={selectedPaths.length} 
+              color="primary" 
+              sx={{ ml: 2 }}
+              showZero
+            />
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Box sx={{ height: '350px', overflow: 'auto' }}>
+            <RichTreeView
+              expanded={expanded}
+              onExpandedChange={handleToggle}
+              selected={selectedPaths}
+              onSelectedChange={handleSelectionChange}
+              items={processTestItData()}
+              checkboxSelection
+              multiSelect
+              disabledItemsFocusable
+              aria-label="Test suites selection"
+            />
+          </Box>
+          
+          {/* Render some debug info if needed */}
+          {/* <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1, fontSize: '0.75rem' }}>
+            <Typography variant="caption">Selected Paths (for debugging): {debugInfo.paths.join(', ')}</Typography>
+          </Box> */}
+        </Paper>
       )}
     </Box>
   );

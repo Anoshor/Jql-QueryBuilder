@@ -103,8 +103,8 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
 
     // Add children if they exist
-    if (suite.Child_Suites?.length) {
-      treeItem.children = suite.Child_Suites.map(childSuite => 
+    if (suite.Suites?.length) {
+      treeItem.children = suite.Suites.map(childSuite => 
         convertSuiteToTreeItem(childSuite, projectId)
       );
     }
@@ -155,7 +155,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
         for (const s of suites) {
           if (!s) continue;
           if (s.Suite_Id === id) return s;
-          const inChild = findSuite(s.Child_Suites || [], id);
+          const inChild = findSuite(s.Suites || [], id);
           if (inChild) return inChild;
         }
         return null;
@@ -168,15 +168,15 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
           suiteMatch = wrapper;
           break;
         }
-        if (wrapper.Child_Suites) {
-          suiteMatch = findSuite(wrapper.Child_Suites, suiteId);
+        if (wrapper.Suites) {
+          suiteMatch = findSuite(wrapper.Suites, suiteId);
           if (suiteMatch) break;
         }
       }
       
       if (suiteMatch) {
         result += ` > ${suiteMatch.Suite_Name || 'Unnamed Suite'}`;
-        currentSuites = suiteMatch.Child_Suites || [];
+        currentSuites = suiteMatch.Suites || [];
       } else {
         result += ` > ${suiteId}`;
       }
@@ -186,14 +186,14 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   };
 
   /**
-   * Handle checkbox selection changes
+   * Handle checkbox selection changes from RichTreeView
    */
   const handleSelectionChange = (newSelectedIds: string[]) => {
-    onPathsChange(newSelectedIds);
+    // Only update if there's a change
+    if (JSON.stringify(newSelectedIds.sort()) !== JSON.stringify(selectedPaths.sort())) {
+      onPathsChange(newSelectedIds);
+    }
   };
-
-  // For debugging
-  console.log('Processed Tree Items:', processTestItData());
 
   return (
     <Box sx={{ width: '100%' }}>

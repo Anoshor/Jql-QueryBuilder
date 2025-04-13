@@ -7,15 +7,13 @@ import {
   IconButton,
   Chip,
   Paper,
-  Checkbox,
 } from '@mui/material';
 import {
   Search as SearchIcon,
   Clear as ClearIcon,
 } from '@mui/icons-material';
-// Instead of defaultCollapseIcon/defaultExpandIcon, we import the basic SimpleTreeView.
-import { SimpleTreeView } from '@mui/x-tree-view';
-import { TreeItem } from '@mui/x-tree-view';
+import { RichTreeView } from '@mui/x-tree-view/RichTreeView';
+import { TreeViewBaseItem } from '@mui/x-tree-view/models';
 import { TestItProject, Suite } from './types';
 
 interface TestItTreeViewProps {
@@ -56,13 +54,6 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   }, [testItData]);
 
   /**
-   * Called by the tree whenever nodes are toggled.
-   */
-  const handleToggle = (_event: React.SyntheticEvent, nodeIds: string[]) => {
-    setExpanded(nodeIds);
-  };
-
-  /**
    * Add or remove a suite path from the array of selectedPaths.
    */
   const toggleSelection = (path: string) => {
@@ -83,80 +74,75 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     : testItData;
 
   /**
-   * Recursively render a suite as a TreeItem (including child suites).
+   * Convert a TestIt project to a TreeViewBaseItem for the RichTreeView
    */
-  const renderSuiteItem = (
-    suite: Suite,
-    projectId: string,
-    parentPath: string = ''
-  ): React.ReactNode => {
-    // Ensure we have a suite and that it has an id
-    if (!suite || !suite.Suite_Id) return null;
+  const convertProjectToTreeItem = (project: TestItProject): TreeViewBaseItem => {
+    const projectId = getProjectId(project);
     
-    // Build the "projectId:suiteId" or deeper path.
+    return {
+      id: projectId,
+      label: project['Project Name'],
+      children: project['Test Suites'].map(suite => convertSuiteToTreeItem(suite, projectId)),
+    };
+  };
+
+  /**
+   * Convert a Suite to a TreeViewBaseItem with proper path-based ID
+   */
+  const convertSuiteToTreeItem = (suite: Suite, projectId: string, parentPath: string = ''): TreeViewBaseItem => {
+    if (!suite || !suite.Suite_Id) {
+      return { id: `${projectId}-invalid`, label: 'Invalid Suite' };
+    }
+    
+    // Build the "projectId:suiteId" or deeper path for the ID
     const thisPath = parentPath
       ? `${parentPath}:${suite.Suite_Id}`
       : `${projectId}:${suite.Suite_Id}`;
     
-    // Combine child arrays—if none exist, children will be an empty array.
-    const children = [
+    // Get children from both possible arrays
+    const childSuites = [
       ...(suite.Child_Suites || []),
       ...(suite.Suites || []),
     ].filter(Boolean);
-    
-    const isSelected = selectedPaths.includes(thisPath);
-    
-    const label = (
-      <Box sx={{ display: 'flex', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-        <Checkbox
-          checked={isSelected}
-          onChange={() => toggleSelection(thisPath)}
-          onClick={(e) => e.stopPropagation()}
-          size="small"
-        />
-        
-        <Typography variant="body2">
-          {suite.Suite_Name}
-        </Typography>
-        
-        {typeof suite.Total_Test_Cases === 'number' && suite.Total_Test_Cases > 0 ? (
-          <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-            ({suite.Total_Test_Cases} tests)
-          </Typography>
-        ) : null}
-      </Box>
-    );
 
-    return (
-      <TreeItem
-        key={suite.Suite_Id}
-        nodeId={thisPath}
-        label={label}
-      >
-        {children.map((child) =>
-          renderSuiteItem(child, projectId, thisPath)
-        )}
-      </TreeItem>
-    );
+    const treeItem: TreeViewBaseItem = {
+      id: thisPath,
+      label: suite.Suite_Name,
+    };
+
+    // Add test case count if available
+    if (typeof suite.Total_Test_Cases === 'number' && suite.Total_Test_Cases > 0) {
+      treeItem.labelText = `${suite.Suite_Name} (${suite.Total_Test_Cases} tests)`;
+    }
+
+    // Add children if they exist
+    if (childSuites.length > 0) {
+      treeItem.children = childSuites.map(child => 
+        convertSuiteToTreeItem(child, projectId, thisPath)
+      );
+    }
+
+    return treeItem;
   };
 
   /**
-   * Render a top-level project as a TreeItem.
-   * Each project's nodeId is obtained from getProjectId().
+   * Process the testItData into a format compatible with RichTreeView
    */
-  const renderProjectItem = (project: TestItProject) => {
-    const projectId = getProjectId(project);
-    return (
-      <TreeItem
-        key={projectId}
-        nodeId={projectId}
-        label={project['Project Name']}
-      >
-        {project['Test Suites'].map((suite) =>
-          renderSuiteItem(suite, projectId)
-        )}
-      </TreeItem>
-    );
+  const processTestItData = (): TreeViewBaseItem[] => {
+    if (!filteredProjects || filteredProjects.length === 0) {
+      return [];
+    }
+    
+    return filteredProjects
+      .filter(Boolean)
+      .map(convertProjectToTreeItem);
+  };
+
+  /**
+   * Handle tree node expand/collapse
+   */
+  const handleToggle = (nodeIds: string[]) => {
+    setExpanded(nodeIds);
   };
 
   /**
@@ -216,6 +202,13 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     return result;
   };
 
+  /**
+   * Handle checkbox selection changes
+   */
+  const handleSelectionChange = (newSelectedIds: string[]) => {
+    onPathsChange(newSelectedIds);
+  };
+
   return (
     <Box sx={{ width: '100%' }}>
       {/* Search box for filtering projects */}
@@ -264,25 +257,24 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
         </Paper>
       )}
       
-      {/* The TreeView (using SimpleTreeView without unsupported props) */}
-      <SimpleTreeView
-        expanded={expanded}
-        onNodeToggle={handleToggle}
-        multiSelect
-      >
-        {!filteredProjects || filteredProjects.length === 0 ? (
-          <Typography variant="body2" sx={{ py: 2 }}>
-            {!testItData || testItData.length === 0
-              ? 'Loading TestIt data...'
-              : 'No projects match your search.'}
-          </Typography>
-        ) : (
-          filteredProjects.map((project) => {
-            if (!project) return null;
-            return renderProjectItem(project);
-          })
-        )}
-      </SimpleTreeView>
+      {/* The TreeView using RichTreeView */}
+      {!filteredProjects || filteredProjects.length === 0 ? (
+        <Typography variant="body2" sx={{ py: 2 }}>
+          {!testItData || testItData.length === 0
+            ? 'Loading TestIt data...'
+            : 'No projects match your search.'}
+        </Typography>
+      ) : (
+        <RichTreeView
+          expanded={expanded}
+          onExpandedChange={handleToggle}
+          selected={selectedPaths}
+          onSelectedChange={handleSelectionChange}
+          items={processTestItData()}
+          checkboxSelection
+          multiSelect
+        />
+      )}
     </Box>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -38,11 +38,6 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   const [expanded, setExpanded] = useState<string[]>([]);
   // For filtering top-level projects by name
   const [searchText, setSearchText] = useState('');
-  // For debugging - display paths being processed
-  const [debugInfo, setDebugInfo] = useState<{paths: string[], treeItems: any[]}>({
-    paths: [],
-    treeItems: []
-  });
 
   /**
    * Expand all top-level projects by default (using their IDs).
@@ -54,22 +49,12 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     }
   }, [testItData]);
 
-  /**
-   * Log selected paths on change for debugging
-   */
-  useEffect(() => {
-    console.log("Current selectedPaths:", selectedPaths);
-  }, [selectedPaths]);
-
   const toggleSelection = (path: string) => {
-    console.log("Toggle selection for path:", path);
     if (selectedPaths.includes(path)) {
       const newPaths = selectedPaths.filter((p) => p !== path);
-      console.log("Removing path, new paths:", newPaths);
       onPathsChange(newPaths);
     } else {
       const newPaths = [...selectedPaths, path];
-      console.log("Adding path, new paths:", newPaths);
       onPathsChange(newPaths);
     }
   };
@@ -77,20 +62,19 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   /**
    * Filter top-level projects by the search text (searching by project name).
    */
-  const filteredProjects = searchText
-    ? testItData.filter((p) =>
-        p.Project_Name?.toLowerCase().includes(searchText.toLowerCase())
-      )
-    : testItData;
+  const filteredProjects = useMemo(() => {
+    return searchText
+      ? testItData.filter((p) =>
+          p.Project_Name?.toLowerCase().includes(searchText.toLowerCase())
+        )
+      : testItData;
+  }, [testItData, searchText]);
 
   /**
    * Convert a TestIt project to a TreeViewBaseItem for the RichTreeView
    */
-  let idCounter = 0;
-  const generateUniqueId = () => `generated-id-${idCounter++}`;
-
   const convertProjectToTreeItem = (project: TestItProject): TreeViewBaseItem => {
-    const id = project.Project_Id || project.id || generateUniqueId();
+    const id = project.Project_Id || project.id || `project-${project.Project_Name}`;
     
     return {
       id,
@@ -105,7 +89,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
     const id = suite.Suite_Id;
     if (!id) {
       return {
-        id: generateUniqueId(),
+        id: `suite-${suite.Suite_Name}-${Math.random().toString(36).substr(2, 9)}`,
         label: suite.Suite_Name || 'Unnamed Suite'
       };
     }
@@ -138,24 +122,16 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
   /**
    * Process the testItData into a format compatible with RichTreeView
    */
-  const processTestItData = (): TreeViewBaseItem[] => {
+  const processedTreeItems = useMemo(() => {
     if (!filteredProjects || filteredProjects.length === 0) {
       return [];
     }
     
-    const treeItems = filteredProjects
+    return filteredProjects
       .filter(Boolean)
       .map(convertProjectToTreeItem)
       .filter(Boolean);
-    
-    // For debugging
-    setDebugInfo({
-      paths: selectedPaths,
-      treeItems
-    });
-    
-    return treeItems;
-  };
+  }, [filteredProjects]);
 
   /**
    * Handle tree node expand/collapse
@@ -220,17 +196,22 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
    * Handle checkbox selection changes from RichTreeView
    */
   const handleSelectionChange = (newSelectedIds: string[]) => {
-    console.log("handleSelectionChange received:", newSelectedIds);
-    
     // Filter out any project-level IDs that are not path-based (shouldn't be selectable)
     const validPathIds = newSelectedIds.filter(id => id.includes(':'));
     
     // Only update if there's a change
     if (JSON.stringify(validPathIds.sort()) !== JSON.stringify(selectedPaths.sort())) {
-      console.log("Updating paths to:", validPathIds);
       onPathsChange(validPathIds);
     }
   };
+
+  // Memoize path names to avoid recalculation on every render
+  const pathDisplayNames = useMemo(() => {
+    return selectedPaths.map(path => ({
+      path,
+      displayName: getPathName(path)
+    }));
+  }, [selectedPaths, testItData]);
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -271,7 +252,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
           </Box>
           <Divider sx={{ mb: 1 }} />
           <List dense>
-            {selectedPaths.map((path) => (
+            {pathDisplayNames.map(({ path, displayName }) => (
               <ListItem
                 key={path}
                 secondaryAction={
@@ -288,7 +269,7 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
                 }}
               >
                 <ListItemText 
-                  primary={getPathName(path)} 
+                  primary={displayName} 
                   primaryTypographyProps={{ variant: 'body2' }}
                 />
               </ListItem>
@@ -323,18 +304,13 @@ const TestItTreeView: React.FC<TestItTreeViewProps> = ({
               onExpandedChange={handleToggle}
               selected={selectedPaths}
               onSelectedChange={handleSelectionChange}
-              items={processTestItData()}
+              items={processedTreeItems}
               checkboxSelection
               multiSelect
               disabledItemsFocusable
               aria-label="Test suites selection"
             />
           </Box>
-          
-          {/* Render some debug info if needed */}
-          {/* <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1, fontSize: '0.75rem' }}>
-            <Typography variant="caption">Selected Paths (for debugging): {debugInfo.paths.join(', ')}</Typography>
-          </Box> */}
         </Paper>
       )}
     </Box>
